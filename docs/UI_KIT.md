@@ -36,6 +36,29 @@
 >   ④ 新增测试命令 `escmode / clicknative / injectdiag / uninject / rects / chain / pageopen / pageback / pageclose`（见 `docs/UI_KIT_TEST.md`）。
 
 > **更新记录**：
+> - 2026-09-13（三十五）**契约扩容（第一/二档 + 命名统一）+ 发 `0.0.1-Alpha-3`**（用户：“第一档先做掉，第二档你提的几个都做掉，第三档改名统一先做”）：
+>   ① **新行动词**：`Stepper`（原生 `− 值 +`，宿主已有 `UiStepper` 终于暴露）、`Foldout`（折叠分组，
+>      **只在展开时调用 body**，收/展后宿主自己重建页面，第三方只需存状态）、`SelectableList`（单行选中高亮，
+>      回调索引）、`Text(..., placeholder, maxLength)`（占位 + **在最窄咽喉 `SetValueInternal` 截断**，覆盖物理键/IME/退格/外部赋值）。
+>   ② **行修饰**：`Hint(string)` / `Hint(Func<string>)`（动态悬停提示）/ `MarkSelected()`；
+>      **与 ModMenu 同名别名** `Bool`/`Number`/`Action`（= `Toggle`/`Slider`/`Button`）—— 一份设置页两个模组都能编译。
+>   ③ **宿主控制**：`Confirm`（原生模态，ESC = 取消；菜单未开时 warn + 回调 false，不会“点了没反应”）、
+>      `CanShowDialog`、`ScrollToKey`/`ScrollToTop`、`PageChanged(old,new)`（懒加载正道）、
+>      `UiKitLang.T/IsChinese/Changed`（宿主推语言；**故意不叫 `UiKitLoc`** —— 宿主里有同名内部类，会歧义引用）、
+>      可选 `IUiKitDefaults.ResetToDefaults()`（宿主在根页追加带确认框的“恢复默认”，与 ModMenu 同名同义）。
+>   ④ **两个设计教训（都已写进代码注释）**：
+>      (a) **折叠箭头不能用字型**：`▾`(U+25BE)/`▸`(U+25B8) 在游戏字体里**无字形**，屏上是一个金色 tofu 方框（截图取证）；
+>          改为 `NativeWidgets.TriangleSprite()` **程序化三角贴图** + 旋转（展开 0°/收起 90°）——与“滑条圆块自己画”同一手法。
+>      (b) **热区注册顺序 = 命中优先级（后注册优先）**：给声明式行“补一个整行热区”本想只为悬停提示，
+>          却会盖住控件内部的 `<`/`>`、`+`/`-`、页签 ⇒ **只给只读行补**；可交互控件的整行热区由控件工厂**先**登记
+>          （`UiStepper`/`UiChoice` 已补），`UiActionRow` 的整行热区补上 `Owner`（以前漏了，会被当成“没热区”）。
+>   ⑤ **实机验证（G 端 BepInEx，脚本驱动）**：基础烟测 `PASS=11 FAIL=0`；交互跑逐项 PASS，截图取证：
+>      折叠展开后子行出现（含 `− 3 +` 步进器）、选中列表第三项高亮且标签变 `当前选中：2`、点“重置”弹出原生确认框
+>      （`Reset to defaults / … / Cancel / OK`）。
+>   ⑥ **发布 `0.0.1-Alpha-3`**：tag `v0.0.1-Alpha-3`（commit `8d7bf67`，31 文件 / 其中 src 23），Release id `387845341`（Pre-release），
+>      两个 zip（175.5/175.3 KB）；公开仓四工程（mod 双端 + 样例双壳）0 错，`release` 包内 README 编码复检 0 乱码。
+>      （gh 创建发布时报了一次 HTTP 502，API 回读证明发布已成功 —— 遇到这种瞬时错误用 `gh release view` 回读，别急着重试。）
+>
 > - 2026-09-13（三十四）**U9 完成 + 发 `0.0.1-Alpha-2`**（用户：“把 U9 做了，更下一个版本”）：
 >   ① **契约文档**：新增 `docs/UI_KIT_API.md`（本仓中文版）/ 公开仓 `docs/API.md`（英文版，同内容），把 API 的 26 个公开成员、
 >      14 个行动词、**页面命名空间 `provider:<Id>[:<页id>]`**、`Refresh()` 与 `IsTextInputFocused` 的冲突规则、

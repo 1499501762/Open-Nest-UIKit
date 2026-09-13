@@ -139,6 +139,27 @@ git grep -n -I -E 'decompiled|ilspy|dnSpy|IronNestCoop' -- .
 
 ## 六、发布记录
 
+### `0.0.1-Alpha-3`（契约扩容：步进器/折叠分组/可选列表/确认框/滚动/语言键，2026-09-13）
+
+| 项 | 值 |
+|---|---|
+| commit | `8d7bf67`（31 文件，其中 `src/**` 23 个；两仓源码/样例逐文件一致） |
+| tag | `v0.0.1-Alpha-3` |
+| Release | id `387845341`，**Pre-release ✅**，正文 = `docs/RELEASE_NOTES.md`（13 140 字符） |
+| 资产 | `OpenNestUIKit-0.0.1-Alpha-3-BepInEx.zip`（175.5 KB）、`…-MelonLoader.zip`（175.3 KB） |
+| 新增契约 | `Stepper` / `Foldout` / `SelectableList` / `Text(placeholder,maxLength)` / `Hint(Func)` / `MarkSelected` / `Bool·Number·Action` 别名 / `Confirm` / `ScrollToKey`+`ScrollToTop` / `PageChanged` / `UiKitLang` / `IUiKitDefaults` |
+| 实机验证 | G 端脚本跑 `PASS=11 FAIL=0`；交互跑：折叠展开出子行、列表选中变 `当前选中：2`、`− 3 +` 步进、点重置弹原生确认框 |
+| 代码校验 | 公开仓四工程（mod 双端 + 样例双壳）0 错；包内 `README.txt` 编码复检 0 乱码 |
+
+⚠️ **本次的两个坑（都在源码注释里留了记录）**：
+
+- **别用字型画图形**：`▾`/`▸` 在游戏字体里没有字形 ⇒ 屏上是**金色 tofu 方框**（截图取证）。改用程序化三角贴图
+  （`NativeWidgets.TriangleSprite()` + 旋转），与“滑条圆块自己画”同一处理。
+- **热区注册顺序就是命中优先级（后注册优先）**：声明式渲染里“给行补整行热区”会盖住控件内部的子热区（`<`/`>`、`+`/`-`、页签），
+  所以**只给只读行补**；可交互控件的整行热区必须由控件工厂先登记。
+- **gh 会偶发 HTTP 502**（创建 release 时遇到一次，随即 `gh release view` 回读证明已成功）：
+  遇到这种瞬时错误先回读状态，不要重复创建。
+
 ### `0.0.1-Alpha-2`（U9：契约文档 + 示例模组，2026-09-13）
 
 | 项 | 值 |
