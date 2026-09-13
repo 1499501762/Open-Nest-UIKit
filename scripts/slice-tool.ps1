@@ -1,4 +1,4 @@
-# 打开/调用 九宫格切片工具（OpenNestUIKit 用）
+﻿# 打开/调用 九宫格切片工具（OpenNestUIKit 用）
 #
 # 为什么有这个包装脚本：工具在 tools\slice_tool.py，从 scripts\ 或仓库根直接敲 `python slice_tool.py` 会找不到文件。
 # 本脚本自己定位仓库根并转发参数，因此从任意 cwd 都能用。

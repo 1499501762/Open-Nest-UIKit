@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 # Open Nest UIKit 打包脚本
 # 本地打包到 release/（两个加载器各一个 zip，不含加载器本身）：
 #   OpenNestUIKit-<ver>-BepInEx.zip       (BepInEx\plugins\OpenNestUIKit.dll + OpenNestUIKit.API.dll)
