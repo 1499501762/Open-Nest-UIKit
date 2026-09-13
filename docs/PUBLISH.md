@@ -140,6 +140,30 @@ git grep -n -I -E 'decompiled|ilspy|dnSpy' -- .
 
 ## 六、发布记录
 
+### `0.0.1-Alpha-4`（扁平工业风 + 键值行 + 双栏页 + IME 中文输入修复，2026-09-13）
+
+| 项 | 值 |
+|---|---|
+| commit | `1637e87`（37 文件，其中 `src/**` 29 个；与主仓库 UIKit 源码逐文件一致） |
+| tag | `v0.0.1-Alpha-4` |
+| Release | id `RE_kwDOUYzbns4XH53w`，**Pre-release ✅**，正文 = `docs/RELEASE_NOTES.md` |
+| 资产 | `OpenNestUIKit-0.0.1-Alpha-4-BepInEx.zip`（180.0 KB）、`…-MelonLoader.zip`（179.8 KB） |
+| 新增契约 | `Info(label,value)` 键值行 / `SelectableList(...,hints,...)` / 列表高度负值 = 撑满 / 双栏声明式页 / `TopRule`+`BottomRule`+`LeftRule` 细线 |
+| 主题 | 扁平工业风：实色填充 + 1px 程序化描边与细线（零贴图、零布局高度）、扁平页签（琥珀文字 + 2px 下划线）、行共享内容底色、选中 = 琥珀底 + 左侧竖条 |
+| 实机验证 | G 端（BepInEx 6）脚本跑：双栏页无外层滚动条、Info 键值行、页签/按钮描边、中文输入端到端（原生提交落日志、无幽灵文本、候选词不重复、发送后不自动重新聚焦）；离线回归 `imedecide` / `imefake` / `imecomp` |
+| 代码校验 | 公开仓 5 工程 0 错 0 警告（`dotnet build -c Release`，G/D 双端 `GameDir`） |
+
+⚠️ **本版三个坑（都在源码注释里留了记录）**：
+
+- **「保持值」不是事件**：`GCS_RESULTSTR` 读完仍然保持上一次的值。早期实现把「上次原生串」在聚焦时清掉，
+  结果下一次聚焦又被当成新提交 ⇒ **旧文本回填**。正确做法：全生命周期保留，并额外用「新提交标记」区分
+  「同值新提交」与「同值仍保持」。
+- **画布输入框没有 EventSystem 焦点 ⇒ Unity 不会打开 `imeCompositionMode`**（一直是 `Off`），系统也就
+  永远不给它关联输入法上下文 ⇒ **只能打英文**。必须自己显式置 `On`（反射，interop 未暴露枚举）
+  并兜底 `ImmCreateContext` + `ImmAssociateContext`（延后 ~0.4s，避免与引擎抢）。
+- **布局自引用会得到 0 高度**：内容高度用子项求和、而子项高度又依赖视口 ⇒ 视口高度算出 0、屏上什么都没有。
+  宿主高度自适应时改为**内容填满视口**（`UiList.fillHost`），问题消失。
+
 ### `0.0.1-Alpha-3`（契约扩容：步进器/折叠分组/可选列表/确认框/滚动/语言键，2026-09-13）
 
 | 项 | 值 |
