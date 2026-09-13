@@ -13,10 +13,10 @@ A standalone library that gives other mods two things the game does not expose:
 Works with **BepInEx 6 (IL2CPP)** and **MelonLoader 0.7.3**, including when MelonLoader
 mods run inside a BepInEx process through the `BepInEx.MelonLoader.Loader` bridge.
 
-> **Status: `0.0.1-Alpha-1` — first public release (pre-release).**
+> **Status: `0.0.1-Alpha-2` — public alpha (pre-release).**
 > The native page, the widget set, the third-party contract, input isolation and the
-> dual-loader packaging are implemented and verified in-game on both loaders.
-> The public contract may still change between alpha builds.
+> dual-loader packaging are implemented and verified in-game on both loaders. The public
+> contract may still change between alpha builds.
 
 ---
 
@@ -77,44 +77,45 @@ public sealed class MyModUi : UiKitProviderBase
 
     public override void BuildMenu(IUiMenuTree menu)
     {
-        var page = menu.Page("mymod.main", "My Mod");
+        menu.Root.Nav("Settings", "settings");
+        menu.Root.Toggle("mymod.enabled", "Enable feature", MyConfig.Enabled, v => MyConfig.Enabled = v);
 
+        var page = menu.Page("settings", "Settings");
         page.Slider("mymod.volume", "Volume", 60, 0, 100, 1, v => MyConfig.Volume = (float)v);
-        page.Toggle("mymod.enabled", "Enable feature", true, v => MyConfig.Enabled = v);
-        page.KeyBind("mymod.hotkey", "Hotkey", "F7", k => MyConfig.Hotkey = k);
         page.Choice("mymod.mode", "Mode", new[] { "Fast", "Native" }, 1, i => MyConfig.Mode = i);
         page.Text("mymod.name", "Player name", MyConfig.Name, s => MyConfig.Name = s);
+        page.KeyBind("mymod.hotkey", "Hotkey", "F7", k => MyConfig.Hotkey = k);
+        page.Tabs("mymod.tab", new[] { "General", "Debug" }, 0, i => MyConfig.Tab = i);
+        page.Columns(280f, left: l => l.Label("list side"), right: r => r.Label("details side"));
         page.Separator();
         page.Button("Apply", "Apply", () => MyConfig.Save());
-        page.Nav("Advanced", "mymod.advanced");
-
-        var advanced = menu.Page("mymod.advanced", "Advanced");
-        advanced.Tabs("mymod.tab", new[] { "General", "Debug" }, 0, i => MyConfig.Tab = i);
-        advanced.List("mymod.list", 300f, list => { /* list.Label(...), list.Button(...) */ });
     }
 }
 ```
 
 ```csharp
-// Register once at startup (idempotent; re-registering the same id replaces it).
-if (UiKitHost.IsHostAvailable)
-    UiKitHost.Register(new MyModUi());
+// Register once at startup — works whether or not Open Nest UIKit is installed.
+UiKitHost.Register(new MyModUi());
 
-// Later, from a keybind or your own menu entry:
-UiKitHost.OpenMenu("mymod.main");
+// Later, from a keybind: the host namespaces provider pages as "provider:<your Id>[:<pageId>]".
+UiKitHost.OpenMenu("provider:mymod");
 ```
 
-Rows available today: `Slider`, `Toggle`, `Choice` (dropdown), `Tabs`, `KeyBind`, `Text`,
-`Button`, `Nav`, `Label`, `Header`, `Separator`, `Progress`, `List`, `Columns` (two-column
-layout), `Size`/`SetCompact` (page sizing).
+Rows available today: `Header`, `Label`, `Separator`, `Button`, `Nav`, `Toggle`, `Slider`,
+`Choice` (dropdown), `Tabs`, `Text`, `KeyBind`, `Progress`, `Columns` (two-column layout),
+`List` (embedded scroller), plus page sizing (`Size`) and density (`SetCompact`).
 
 `UiKitHost` is the host-side contract: `Register`/`Unregister` providers, `OpenMenu`/
 `CloseMenu`/`ToggleMenu`/`Refresh`, `IsMenuOpen`/`CurrentPageId`/`IsTextInputFocused`, and
 the chat overlay (`SetChat`/`FocusChat`/`CloseChat`). It is a **soft dependency** — a mod
 that references only `OpenNestUIKit.API.dll` still loads when this mod is absent,
-`IsHostAvailable` is `false`, and the calls do nothing.
+`IsHostAvailable` is `false`, and the calls do nothing. Every provider also gets a row in the
+game's own ESC list (`IUiKitNativeEntry` changes or disables it).
 
 The contract is versioned (`UiKitHost.ApiVersion`); a breaking change bumps it.
+
+📖 **Full contract reference: [docs/API.md](docs/API.md).** A complete, buildable example mod
+(both loaders, one shared provider): **[samples/](samples)**.
 
 ### In-game test & automation harness
 
@@ -181,6 +182,8 @@ Close the game before deploying — the plugin DLL is locked while it runs.
 | `src/OpenNestUIKit/` | The mod itself: BepInEx shell, `Core/`, `Menu/`, `Layout/`, `Widgets/`, `Theme/`, `Native/`, `Pages/`, `Vendor/` (vendored UI/logging base with its own namespace). |
 | `src/OpenNestUIKit.MelonMod/` | MelonLoader entry point; compiles the same `src/OpenNestUIKit/**` sources. |
 | `src/OpenNestUIKit.Test/`, `src/OpenNestUIKit.Test.MelonMod/` | The in-game test harness mod (dev tool, not shipped in release packages). |
+| `samples/` | A complete sample third-party mod: shared provider + BepInEx and MelonLoader shells. |
+| `docs/API.md` | **Third-party contract reference** — every provider/host type, row verb and lifecycle rule. |
 | `docs/UI_KIT.md` | Design notes: native-page geometry, widget specs, input isolation, measured evidence, update log. |
 | `docs/UI_KIT_SLICE.md` | Slice/atlas tooling: how this mod consumes the game's 9-slice sprites. |
 | `docs/UI_KIT_TEST.md` | The test harness: every CLI command, and what it proves. |
@@ -211,7 +214,7 @@ Full design notes: [docs/UI_KIT.md](docs/UI_KIT.md).
 | U6 | Slice/atlas tooling + hot-reloaded slice definitions | ✅ |
 | U7 | In-game test harness with scripted input and geometry probes | ✅ |
 | U8 | Rubber-band scrolling, squared-up handle travel, native handle colours | ✅ |
-| U9 | Public API documentation (`docs/API.md`) and sample mod | ⏳ |
+| U9 | Public API documentation (`docs/API.md`) and sample mod | ✅ |
 | U10 | Cross-loader test matrix (BepInEx without bridge, MelonLoader build inside BepInEx) | ⏳ |
 
 **Test matrix (honest scope):** verified in-game on **G-side** (BepInEx 6 + bridge) and

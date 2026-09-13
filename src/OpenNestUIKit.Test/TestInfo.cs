@@ -5,7 +5,7 @@ public static class TestInfo
 {
     public const string Guid = "open.nest.uikit.test";
     public const string Name = "Open Nest UIKit Test";
-    public const string Version = "0.0.1-Alpha-1";
+    public const string Version = "0.0.1-Alpha-2";
     public const string Author = "OpenNestUIKit";
 
     public static string BuildPlatform =>

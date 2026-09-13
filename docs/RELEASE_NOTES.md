@@ -1,4 +1,69 @@
-# Open Nest UIKit `0.0.1-Alpha-1` — Release Notes
+# Open Nest UIKit — Release Notes
+
+## `0.0.1-Alpha-2` — API reference + sample mod
+
+A documentation-and-example release: **no behaviour change** in the shipped binaries (the only
+difference from `0.0.1-Alpha-1` is the version string they report).
+
+### What's new
+
+- **`docs/API.md` — the third-party contract reference.** Every type a mod can use, written
+  against the actual sources: provider identity, the page/row model, all 14 row verbs with their
+  exact signatures and caveats, the host-control surface (`OpenMenu` / `Refresh` /
+  `IsTextInputFocused` / chat overlay), the native-ESC entry opt-in (`IUiKitNativeEntry`),
+  lifecycle/threading rules, and the packaging rule that matters most — **reference
+  `OpenNestUIKit.API.dll` but do not ship it**.
+- **`samples/` — a complete, buildable sample mod.** One shared provider file (plain .NET, no
+  Unity) plus a BepInEx 6 shell and a MelonLoader shell, each with its own `.csproj` and deploy
+  switch. Both shells compile from the same source, which is the point: the provider does not
+  care which loader runs it.
+- **Corrected provider page ids in the README.** Provider pages are namespaced by the host as
+  `provider:<Id>[:<pageId>]` — the old README example passed a page id that would only have
+  worked by accident.
+- The samples are built with `Private="false"` on the API reference, so a sample build produces
+  exactly one dll — no duplicate `OpenNestUIKit.API.dll` in `plugins/`.
+
+### What the sample demonstrates
+
+| Page | Shows |
+|---|---|
+| root | labels, sub-page entries, a toggle that triggers `UiKitHost.Refresh()` |
+| General | slider, dropdown, text field, action button, and a row that only exists while the feature is off |
+| Keys | key binding plus a live "current binding" line |
+| Live data | an embedded scrolling `List` rebuilt on demand, guarded by `IsTextInputFocused` |
+| Two columns | `Columns` layout: list on the left, details on the right |
+| About | host diagnostics (`IsHostAvailable`, `HostVersion`, `ApiVersion`, `ProviderCount`, `CurrentPageId`) |
+
+### Build status
+
+`docs/API.md` and the sample were written against the contract sources, then verified by
+building them: **both sample shells and both loader builds of the mod compile with 0 errors /
+0 warnings**, and a fresh clone of the tag builds the same way.
+
+### Installation
+
+```
+BepInEx    : OpenNestUIKit.dll + OpenNestUIKit.API.dll  ->  <Game>/BepInEx/plugins/
+MelonLoader: OpenNestUIKit.MelonMod.dll                 ->  <Game>/Mods/
+             OpenNestUIKit.API.dll                      ->  <Game>/UserLibs/
+```
+
+Launch the game once with your loader installed before installing this mod. Do not install both
+loader builds at once.
+
+### Known limits
+
+- **Only two of four loader combinations are verified** (BepInEx-with-bridge and native
+  MelonLoader); the other two have no test environment here.
+- The public API is alpha: breaking changes bump `UiKitHost.ApiVersion`.
+- The sample targets the mod's own repository layout (it references `src/OpenNestUIKit.API` as a
+  project). Third-party mods should reference the shipped assembly instead — see `docs/API.md` §10.
+- No automated test runs the sample in-game; it is verified to compile and to use the contract
+  exactly as documented.
+
+---
+
+## `0.0.1-Alpha-1` — first public release
 
 **First public release (pre-release).** An alpha: the native page, the widget set, the
 third-party contract, input isolation and dual-loader packaging are implemented and
@@ -83,6 +148,7 @@ assemblies are generated on first launch). Do not install both loader builds at 
 - Page layout is authored for the game's current UI scale; a game update that changes the
   native settings layout can shift the metrics.
 - `docs/API.md` (written API documentation) and a sample mod are not written yet.
+  *(Both landed in `0.0.1-Alpha-2`.)*
 
 ## License
 
