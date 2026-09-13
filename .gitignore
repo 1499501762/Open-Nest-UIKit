@@ -21,13 +21,18 @@ shots/
 
 # ---- Game files, interop assemblies and extracted game assets ----
 # Never commit anything that ships with the game.
-BepInEx/
-interop/
-Il2CppAssemblies/
-UserLibs/
-Mods/
-ref/
-model/
+#
+# ⚠️ These are the *_installed game's* folders, which only ever appear at the repository root
+# (deploying the mod drops the dll into <Game>/BepInEx/plugins, <Game>/Mods, …). They are
+# anchored with a leading slash on purpose: unanchored patterns like `BepInEx/` also match
+# `samples/BepInEx/`, which silently kept a sample shell out of a release.
+/BepInEx/
+/interop/
+/Il2CppAssemblies/
+/UserLibs/
+/Mods/
+/ref/
+/model/
 *.bundle
 Assembly-CSharp*.dll
 Il2Cpp*.dll
