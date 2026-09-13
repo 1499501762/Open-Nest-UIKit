@@ -295,6 +295,33 @@ public sealed class UiList : UiWidget
     }
 
     /// <summary>
+    /// 把某一行滚到可见位置（第三方契约的 <c>UiKitHost.ScrollToKey</c> 最终走到这里）。
+    ///
+    /// 行已经完整可见时**不动**（否则点一下列表就“跳一下”，体验很差）。
+    /// 坐标系：流的行都是左上对齐（pivot=(0,1)），所以“行顶距内容顶” = <c>-anchoredPosition.y</c>。
+    /// 返回是否真的生效（行不在本列表里 / 内容不够长 → false）。
+    /// </summary>
+    public bool ScrollToWidget(UiWidget w, float pad = 8f)
+    {
+        try
+        {
+            if (w == null || w.Rect == null) return false;
+            float max = Mathf.Max(0f, ContentHeight - _viewportH);
+            if (max <= 0f) return false;
+            float y = -w.Rect.anchoredPosition.y;            // 行顶距内容顶的像素
+            if (float.IsNaN(y) || float.IsInfinity(y)) return false;
+            float rowH = 0f;
+            try { rowH = w.Rect.rect.height; } catch { }
+            if (y >= _scroll - 0.5f && y + rowH <= _scroll + _viewportH + 0.5f) return true;   // 已可见
+            _scroll = Mathf.Clamp(y - Mathf.Max(0f, pad), 0f, max);
+            ApplyScroll();
+            Cull();
+            return true;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>
     /// 每帧驱动（<see cref="Core.UiKitBehaviour"/> 调用）：**尺寸后到 / 窗口尺寸变化**时自动重排。
     /// 页面往往在窗口尺寸就绪前就构建了，首次 <see cref="ApplyLayout"/> 量不到宽度 → 这里补算。
     /// </summary>

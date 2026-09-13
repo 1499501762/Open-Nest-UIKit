@@ -23,7 +23,7 @@ namespace OpenNestUIKit.Sample;
 /// <item><c>about</c>: host/contract diagnostics — useful while integrating.</item>
 /// </list>
 /// </summary>
-public sealed class SampleMenu : UiKitProviderBase, IUiKitNativeEntry
+public sealed class SampleMenu : UiKitProviderBase, IUiKitNativeEntry, IUiKitDefaults
 {
     /// <summary>Stable provider id. Host page ids are namespaced with it: <c>provider:sample.mod</c>.</summary>
     public const string ModId = "sample.mod";
@@ -32,6 +32,14 @@ public sealed class SampleMenu : UiKitProviderBase, IUiKitNativeEntry
     public override string DisplayName => "Sample Mod";
     public override string Version => "1.0.0";
     public override string Author => "OpenNestUIKit";
+
+    // ---- IUiKitDefaults: the host puts a "Reset to defaults" row (with a native confirm dialog) on our root page
+    public void ResetToDefaults()
+    {
+        _cfg.Reset();
+        _selected = 0;
+        _players.RemoveRange(3, Math.Max(0, _players.Count - 3));
+    }
 
     // ---- IUiKitNativeEntry: what goes into the game's own ESC list --------------------------
     // The host injects the row; a third-party mod never touches the game's UI itself.
@@ -42,7 +50,9 @@ public sealed class SampleMenu : UiKitProviderBase, IUiKitNativeEntry
 
     private readonly SampleConfig _cfg;
     private readonly List<string> _players = new List<string> { "Host", "Player 2", "Player 3" };
+    private bool _advancedOpen;
     private int _selected;
+    private string _lastConfirm = "";
 
     public SampleMenu(SampleConfig cfg) { _cfg = cfg; }
 
@@ -64,7 +74,13 @@ public sealed class SampleMenu : UiKitProviderBase, IUiKitNativeEntry
 
         // ---------------- general ----------------
         var general = menu.Page("general", "General");
-        general.Header("Gameplay");
+        general.Header(UiKitLang.T("玩法", "Gameplay"));            // UiKitLang.T 跟着游戏语言走
+        general.Toggle("sample.enabled", "Enable sample feature", _cfg.Enabled, v =>
+        {
+            _cfg.Enabled = v;
+            _cfg.Save();
+            UiKitHost.Refresh();               // keep dependent rows in sync
+        }).Hint(() => UiKitLang.T("当前：", "now: ") + (_cfg.Enabled ? "on" : "off"));   // 悬停时实时取文本
         general.Slider("sample.range", "Range (m)", _cfg.Range, 10, 500, 5, v =>
         {
             _cfg.Range = v;
@@ -79,7 +95,7 @@ public sealed class SampleMenu : UiKitProviderBase, IUiKitNativeEntry
         {
             _cfg.Callsign = v;
             _cfg.Save();
-        });
+        }, UiKitLang.T("输入呼号…", "type a callsign…"), 16);        // 占位提示 + 最长 16 字符
         if (!_cfg.Enabled)
         {
             // Content can depend on state: BuildMenu runs again on every open/refresh.
@@ -94,6 +110,38 @@ public sealed class SampleMenu : UiKitProviderBase, IUiKitNativeEntry
             UiKitHost.Refresh();
         });
         general.Nav("Show the current binding", "keys");
+
+        // ---------------- server: stepper / foldout / selectable list ----------------
+        var server = menu.Page("server", "Server");
+        server.Header("Numeric entry");
+        server.Stepper("sample.slots", "Player slots", _cfg.Slots, 1, 16, 1, v =>
+        {
+            _cfg.Slots = (int)v;
+            _cfg.Save();
+        }).Hint(() => UiKitLang.T("−/+ 每步 1；当前 ", "−/+ step 1; now ") + _cfg.Slots);
+
+        server.Header("Collapsible group");
+        server.Foldout("sample.advanced", "Advanced settings", _advancedOpen, v =>
+        {
+            // The host rebuilds the page after a foldout toggle; we only remember the new state.
+            _advancedOpen = v;
+        }, g =>
+        {
+            g.Label("Rows here only exist while the group is expanded (`body` is not called when collapsed).");
+            g.Toggle("sample.debug", "Verbose logging", _cfg.Verbose, v => { _cfg.Verbose = v; _cfg.Save(); });
+            g.Slider("sample.tick", "Tick rate", _cfg.TickRate, 1, 60, 1, v => { _cfg.TickRate = v; _cfg.Save(); });
+        });
+
+        server.Separator();
+        server.Header("Pick one (selection highlight, no button per row)");
+        server.SelectableList("sample.region", 200f,
+            new[] { "Europe", "North America", "Asia" }, _cfg.RegionIndex, i =>
+            {
+                // Selection highlight is repainted by the host; we only persist the index.
+                _cfg.RegionIndex = i;
+                _cfg.Save();
+            });
+        server.Label("Selected region: " + _cfg.RegionName());
 
         // ---------------- keys ----------------
         var keys = menu.Page("keys", "Keys");
@@ -165,7 +213,30 @@ public sealed class SampleMenu : UiKitProviderBase, IUiKitNativeEntry
         about.Label("ApiVersion  : " + UiKitHost.ApiVersion);
         about.Label("Providers   : " + UiKitHost.ProviderCount);
         about.Label("CurrentPage : " + (UiKitHost.CurrentPageId.Length == 0 ? "(menu closed)" : UiKitHost.CurrentPageId));
+        about.Label("Dialog      : " + UiKitHost.CanShowDialog);
         about.Progress("Sample progress", 0.42);
+        about.Separator();
+        about.Header("Things the host can do for you");
+        about.Button("Ask the player to confirm something", "Confirm", () =>
+            UiKitHost.Confirm(
+                UiKitLang.T("重启服务器", "Restart the server"),
+                UiKitLang.T("当前对局会被断开，确定吗？", "The current match will be dropped. Continue?"),
+                ok =>
+                {
+                    // A real mod performs the action here; the sample only records the answer.
+                    _lastConfirm = ok ? "confirmed" : "cancelled";
+                    if (!UiKitHost.IsTextInputFocused) UiKitHost.Refresh();
+                }));
+        if (_lastConfirm.Length > 0) about.Label("Last dialog result: " + _lastConfirm);
+        about.Button("Scroll the Server page to the region list", "Scroll", () =>
+        {
+            UiKitHost.OpenMenu("provider:" + ModId + ":server");
+            UiKitHost.ScrollToKey("sample.region");
+        });
+        about.Button("Back to top", "Top", () => UiKitHost.ScrollToTop());
+
+        // Page lifecycle: refresh when our page becomes visible (lazy data), and repaint on language change.
+        about.Label("Tip: subscribe to UiKitHost.PageChanged / UiKitLang.Changed from your mod entry point.");
     }
 
     /// <summary>Rebuild the page, but never while the player is typing in a text field.</summary>

@@ -22,9 +22,15 @@ menu — drawn with the game's native widget set — without linking to the mod 
 | `IUiKitProvider` identity + `BuildMenu(IUiMenuTree)` | ✅ implemented — called on menu open and on `Refresh()` |
 | `IUiKitNativeEntry` (`ShowInNativeMenu` / `NativeOrder` / `NativeTitle` / `NativeTitleEn`) | ✅ implemented — a row is injected into the game's ESC list for every provider by default; opt out or re-title/order it here |
 | Page model (`UiPageDef`, `UiRow`, `UiRowKind`, `UiMenuTree`) | ✅ implemented |
-| Row family (`Header` / `Label` / `Separator` / `Button` / `Nav` / `Toggle` / `Slider` / `Choice` / `Tabs` / `Text` / `KeyBind` / `Progress` / `Columns` / `List` / `Add`) | ✅ rendered — every row renders as the game's own widget (text fields include the in-game IME/keyboard pipeline, key rows capture the pressed key) |
+| Row family (`Header` / `Label` / `Separator` / `Button` / `Nav` / `Toggle` / `Slider` / `Stepper` / `Choice` / `Tabs` / `Text` / `KeyBind` / `Progress` / `Foldout` / `SelectableList` / `Columns` / `List` / `Add`) | ✅ rendered — every row renders as the game's own widget (text fields include the in-game IME/keyboard pipeline, key rows capture the pressed key) |
+| Row modifiers (`Hint(text)` / `Hint(Func<string>)` / `MarkSelected`) and ModMenu-compatible aliases (`Bool` / `Number` / `Action`) | ✅ implemented — dynamic hints show as hover tooltips |
 | Page sizing (`Size`) and density (`SetCompact`) | ✅ implemented |
 | Host controls (`OpenMenu` / `CloseMenu` / `ToggleMenu` / `Refresh` / `IsMenuOpen` / `CanControlMenu` / `CurrentPageId` / `IsTextInputFocused`) | ✅ implemented (`CanControlMenu` is `false` until the host is loaded) |
+| `UiKitHost.PageChanged` (page shown/hidden) | ✅ implemented — fired on open, navigate, back and close |
+| Dialog (`Confirm` / `CanShowDialog`) | ✅ implemented — native modal, ESC = cancel |
+| Scrolling (`ScrollToKey` / `ScrollToTop`) | ✅ implemented for declarative pages (a row is only moved when it is not already visible) |
+| Localisation (`UiKitLang.T` / `IsChinese` / `Changed`) | ✅ implemented — the host pushes the game language |
+| Optional `IUiKitDefaults` (reset button) | ✅ implemented — the host appends a confirmed "Reset to defaults" row to your root page |
 | Chat overlay (`SetChat` / `ClearChat` / `FocusChat` / `CloseChat` / `CanShowChat` / `IsChatTyping`) | ✅ implemented — one floating panel per host, driven by your line/en send callbacks |
 
 `UiKitHost.ApiVersion` is currently **1**. Nothing in this document is a placeholder — if a
@@ -194,12 +200,32 @@ All verbs are chainable and return the same `UiPageDef`.
 | `Tabs(string key, IReadOnlyList<string> tabs, int index, Action<int> onChanged)` | tab bar |
 | `Toggle(string key, string label, bool value, Action<bool> onChanged)` | native checkbox |
 | `Slider(string key, string label, double value, double min, double max, double step, Action<double> onChanged)` | native slider |
+| `Stepper(string key, string label, double value, double min, double max, double step, Action<double> onChanged)` | native `− value +` numeric row |
 | `Choice(string key, string label, IReadOnlyList<string> choices, int selected, Action<int> onChanged)` | dropdown (or `◀ value ▶` scroller in narrow pages) |
 | `Text(string key, string label, string value, Action<string> onChanged)` | text field (in-game keyboard/IME) |
+| `Text(string key, string label, string value, Action<string> onChanged, string placeholder, int maxLength = 0)` | text field with a grey placeholder and a hard length limit |
 | `KeyBind(string key, string label, string current, Action<string> onChanged)` | key capture box |
 | `Progress(string label, double value01)` | read-only progress bar (clamped to 0..1) |
+| `Foldout(string key, string label, bool expanded, Action<bool> onToggle, Action<UiPageDef> body)` | collapsible group (▾ when open, ▶ when closed) |
+| `SelectableList(string key, float height, IReadOnlyList<string> items, int selected, Action<int> onSelected)` | scrolling list with one highlighted row |
 | `Columns(float leftWidth, Action<UiPageDef> left, Action<UiPageDef> right, float gap = 12f)` | two columns, see §5 |
 | `List(string key, float height, Action<UiPageDef> build)` | scrolling sub-list, see §5 |
+
+**Row modifiers** (they apply to the row you added last, so put them right after it):
+
+| Modifier | Effect |
+|---|---|
+| `Hint(string text)` | static secondary line / hover text |
+| `Hint(Func<string> text)` | **dynamic** hover text, evaluated when the pointer enters the row (`() => "now " + value`) |
+| `MarkSelected(bool selected = true)` | mark a hand-built row as selected (use `SelectableList` if you do not need custom rows) |
+
+**ModMenu-compatible aliases** — the same three verbs exist under the names used by `OpenNestModMenu.API`, so a page written for one mod compiles unchanged against the other:
+
+| Alias | Same as |
+|---|---|
+| `Bool(key, label, value, onChanged)` | `Toggle` |
+| `Number(key, label, value, min, max, step, onChanged)` | `Slider` |
+| `Action(label, buttonText, onClick)` | `Button` |
 
 Details worth knowing:
 
@@ -252,6 +278,22 @@ page.Columns(440f,
 regions whose row count is unknown (mod lists, room lists, logs) so the whole page does not grow
 and scroll instead.
 
+**`Foldout`** — a collapsible group. The `body` callback is only invoked **while the group is
+expanded**, so a collapsed group does not cost anything. Store the new state in `onToggle`; the
+host rebuilds the page for you (no `Refresh()` call needed):
+
+```csharp
+page.Foldout("mymod.advanced", "Advanced", _advancedOpen, v => _advancedOpen = v, g =>
+{
+    g.Label("Only rendered while the group is open.");
+    g.Stepper("mymod.slots", "Slots", _cfg.Slots, 1, 16, 1, v => _cfg.Slots = (int)v);
+});
+```
+
+**`SelectableList`** — a fixed-height scrolling list where exactly one row is highlighted; the
+callback receives the index (the host repaints the highlight). Use it for "pick one, then show its
+details" flows instead of a button per row.
+
 ---
 
 ## 6. Host controls
@@ -263,6 +305,7 @@ UiKitHost.HostVersion         // host mod version, "" when unavailable
 UiKitHost.ProviderCount       // registered providers
 UiKitHost.Providers           // snapshot array of IUiKitProvider
 UiKitHost.Changed             // event: registry changed / host (un)available
+UiKitHost.PageChanged         // event (oldPageId, newPageId): page shown/hidden — "" = menu closed
 
 UiKitHost.Register(provider);          UiKitHost.Unregister(provider);
 UiKitHost.Unregister("mymod");         // by id
@@ -275,6 +318,12 @@ UiKitHost.ToggleMenu(pageId = null);
 UiKitHost.Refresh();                   // rebuild the current page in place
 UiKitHost.CurrentPageId                // "" when the menu is closed
 UiKitHost.IsTextInputFocused           // true while a text field in the menu has focus
+
+UiKitHost.ScrollToKey("mymod.slots");  // bring the row with that Key into view
+UiKitHost.ScrollToTop();
+
+UiKitHost.CanShowDialog                // the host provides a modal
+UiKitHost.Confirm(title, body, ok => { ... });   // native modal; ESC = cancel
 ```
 
 Semantics:
@@ -292,7 +341,43 @@ Semantics:
   ```
 
 - `Changed` fires when providers register/unregister and when the host comes online — a good
-  place to log "connected to UIKit 0.0.1-Alpha-1".
+  place to log "connected to UIKit 0.0.1-Alpha-3".
+- `PageChanged` is the cheap way to do lazy work: pull data when *your* page becomes visible
+  (`newId == "provider:" + Id`) instead of doing it inside `BuildMenu`.
+- `Confirm` needs the menu to be open (it renders in the menu canvas and takes the pointer); if the
+  menu is closed the call logs a warning and invokes the callback with `false`, so your flow still
+  terminates. `UiKitHost.CanShowDialog` tells you whether a host is listening at all.
+- `ScrollToKey` matches the `Key` you gave a row; it is a no-op when the row is already fully
+  visible, or when the current page is not a declarative page.
+
+---
+
+## 6.1 Localisation (UiKitLang)
+
+The host knows the game language; use `UiKitLang` so your page follows it:
+
+```csharp
+page.Label(UiKitLang.T("已连接", "Connected"));
+UiKitLang.IsChinese;                 // current language
+UiKitLang.Changed += () => UiKitHost.Refresh();   // repaint on a language switch
+```
+
+> The class is called `UiKitLang` (not `UiKitLoc`) because the host assembly has its own internal
+> `UiKitLoc`; the contract name must not collide with it.
+
+## 6.2 Optional: a reset button (IUiKitDefaults)
+
+```csharp
+public sealed class MyModMenu : UiKitProviderBase, IUiKitDefaults
+{
+    public void ResetToDefaults() { MyConfig.Reset(); }   // the host calls this after confirmation
+}
+```
+
+Implementing the interface makes the host append a **"Reset to defaults"** row to your root page;
+clicking it opens the native confirm dialog and calls you only when the player agrees (then the host
+refreshes). Same name and meaning as `OpenNestModMenu.API.IModMenuProvider.ResetToDefaults`, so one
+settings class can serve both mods.
 
 ---
 

@@ -120,6 +120,9 @@ public static class UiKitHost
     private static Action _clearChat;
     private static Action<string> _focusChat;
     private static Action _closeChat;
+    private static Action<string, Action<bool>> _confirm;
+    private static Action<string> _scrollTo;
+    private static Action _scrollTop;
 
     /// <summary>本库菜单当前是否打开（宿主未就绪时恒为 false）。</summary>
     public static bool IsMenuOpen
@@ -170,6 +173,51 @@ public static class UiKitHost
     public static bool IsTextInputFocused
     {
         get { try { return _textFocused != null && _textFocused(); } catch { return false; } }
+    }
+
+    // ---------------- 页面事件 / 滚动定位 / 确认框（宿主提供实现） ----------------
+
+    /// <summary>
+    /// 当前显示页面发生变化（<c>(旧页 id, 新页 id)</c>；关闭菜单 = 新 id 为空串）。
+    ///
+    /// 用途：页面被打开时才去拉数据 / 只在"我这一页被看着"时启动轮询，而不是在 <c>BuildMenu</c> 里做重活。
+    /// </summary>
+    public static event Action<string, string> PageChanged;
+
+    /// <summary>宿主专用：页面切换时通知契约（第三方不要调用）。</summary>
+    internal static void RaisePageChanged(string oldId, string newId)
+    {
+        try { PageChanged?.Invoke(oldId ?? "", newId ?? ""); } catch { /* 订阅者异常不外溢 */ }
+    }
+
+    /// <summary>
+    /// 弹一个**原生确认框**（遮罩 + 标题/正文 + 确定/取消），结果回调 <paramref name="onResult"/>。
+    ///
+    /// 用途："恢复默认""退出房间"这种要确认的动作；没装宿主时静默无效（不抛异常）。
+    /// ESC = 取消（宿主会压一层 ESC 等级，不会顺手把菜单也关掉）。
+    /// </summary>
+    public static void Confirm(string title, string body, Action<bool> onResult)
+    {
+        try { _confirm?.Invoke(MakeConfirmPayload(title, body), onResult); } catch { }
+    }
+
+    /// <summary>把标题/正文打包（宿主侧按 '\\n' 拆；保持契约只有一个 string 参数，方便以后加字段）。</summary>
+    private static string MakeConfirmPayload(string title, string body)
+        => (title ?? "") + "\n" + (body ?? "");
+
+    /// <summary>宿主是否提供了确认框（未就绪 = false）。</summary>
+    public static bool CanShowDialog => _confirm != null;
+
+    /// <summary>把某一行（按 <see cref="UiRow.Key"/>）滚动到可见位置 —— 列表/详情联动用。</summary>
+    public static void ScrollToKey(string key)
+    {
+        try { _scrollTo?.Invoke(key ?? ""); } catch { }
+    }
+
+    /// <summary>页面滚回顶部（<see cref="Refresh"/> 之后复位视线用）。</summary>
+    public static void ScrollToTop()
+    {
+        try { _scrollTop?.Invoke(); } catch { }
     }
 
     // ---------------- 悬浮聊天层（第三方“会话中的聊天”交给宿主渲染） ----------------
@@ -241,6 +289,14 @@ public static class UiKitHost
         _currentPage = currentPage;
         _textFocused = textFocused;
         RaiseChanged();
+    }
+
+    /// <summary>宿主专用：挂上确认框 / 滚动定位实现（宿主关闭时传 null 即解钩）。</summary>
+    internal static void SetViewControls(Action<string, Action<bool>> confirm, Action<string> scrollToKey, Action scrollTop)
+    {
+        _confirm = confirm;
+        _scrollTo = scrollToKey;
+        _scrollTop = scrollTop;
     }
 
     // ---------------- 宿主专用（internal：靠 InternalsVisibleTo 只对本库壳开放） ----------------

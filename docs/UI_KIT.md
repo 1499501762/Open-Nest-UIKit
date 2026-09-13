@@ -36,6 +36,48 @@
 >   ④ 新增测试命令 `escmode / clicknative / injectdiag / uninject / rects / chain / pageopen / pageback / pageclose`（见 `docs/UI_KIT_TEST.md`）。
 
 > **更新记录**：
+> - 2026-09-13（三十四）**U9 完成 + 发 `0.0.1-Alpha-2`**（用户：“把 U9 做了，更下一个版本”）：
+>   ① **契约文档**：新增 `docs/UI_KIT_API.md`（本仓中文版）/ 公开仓 `docs/API.md`（英文版，同内容），把 API 的 26 个公开成员、
+>      14 个行动词、**页面命名空间 `provider:<Id>[:<页id>]`**、`Refresh()` 与 `IsTextInputFocused` 的冲突规则、
+>      原生入口 `IUiKitNativeEntry`、聊天层、生命周期、**“只引不打包 Api dll”（`Private="false"`）** 全部写成对照实际的说明。
+>   ② **示例模组**：新增 `samples/`（本仓 + 公开仓同路径）= `Shared/{SampleMenu,SampleConfig}.cs`（纯 .NET provider）
+>      + `BepInEx/`、`MelonLoader/` 两个壳各带 csproj（含 `DeployToGame`/`DeployToMods`）；
+>      四个工程（mod 双端 + 样例双壳）实测 **0 错**，样例产物只有 1 个 dll（证明 `Private="false"` 生效）。
+>   ③ **发布 `0.0.1-Alpha-2`**：tag `v0.0.1-Alpha-2`（commit `322842d`，注释标签；先前 `a4158ca` 是文档/示例提交），
+>      Release id `387840362`（**Pre-release**），资产两个 zip（168.6 / 168.4 KB），公开仓 102 文件、样例 7 文件。
+>   ④ **两个发布期缺陷（已修）**：
+>      (a) **`.gitignore` 未锚定的 `BepInEx/` 会连 `samples/BepInEx/` 一起忽略** → 样例的 BepInEx 壳没进仓库/tag；
+>          修法：把“装进游戏的目录”全部锚定到仓库根（`/BepInEx/` 等），再用 `git tag -f` + `git push --force origin <tag>` 把标签重指到修复提交。
+>      (b) **PS 5.1 按 ANSI 读无 BOM 的 UTF-8** → Release 正文的 `—` 变成 `鈥?`、包内 `README.txt` 的中文变 `鍘熺敓…`；
+>          修法：数据文件一律 `[IO.File]::ReadAllText(path, UTF8)`（或 `gh --notes-file`），含非 ASCII 的 `.ps1` 存 UTF-8 **with BOM**；
+>          已用 `gh release edit --notes-file` + `gh release upload --clobber` 重刷两版正文与资产。
+>      （本机现已安装 `gh` 2.100.0 并登录 `1499501762`，发布流程以 `gh` 为首选；完整坑表见公开仓 `docs/PUBLISH.md` §七。）
+> - 2026-09-13（三十三）**拆分成独立公开仓库 + 发首个版本 `0.0.1-Alpha-1`**（用户：“创建一个新公开仓库，推代码，release 第一个版本
+>   0.0.1-Alpha-1(Pre-release)”“协议和贡献模仿 OpenNestModMenu”）：
+>   ① **新仓库** = `d:\Dev\Open-Nest-UIKit`（对应 GitHub `1499501762/Open-Nest-UIKit`，Public），按家族“一模组一仓库”惯例与主仓库分离；
+>      只含 `src\OpenNestUIKit{,.API,.MelonMod,.Test,.Test.MelonMod}`、`docs\UI_KIT{,_SLICE,_TEST}.md`、
+>      `tools\slice_tool.py`、`scripts\slice-tool.ps1`、`LICENSE`（AGPL-3.0，与主仓库同一份）+ 新增
+>      `README.md` / `CONTRIBUTING.md` / `docs\PUBLISH.md` / `docs\RELEASE_NOTES.md` / `scripts\package.ps1` / `.gitignore`；
+>      94 个文件、27 874 行，首个提交 `feat: initial public release 0.0.1-Alpha-1`，注释 tag `v0.0.1-Alpha-1`。
+>      自足性已核实：5 个工程只引用彼此 + 加载器/interop dll，`GameDir`/`BepInExDir`/`ClientGame`→`MLBase`/`MLCore` 默认值都写在工程内，
+>      无根 `Directory.Build.props`；4 个工程在独立目录里双端编译 **0 错 0 警**。
+>   ② **版本号两处**：`src/OpenNestUIKit/UiKitInfo.cs` 的 `public const string Version` 与 5 个 `.csproj` 的 `<Version>`（含测试模组
+>      `TestInfo.Version`），从 `0.1.0` 统一为 `0.0.1-Alpha-1`（`ProductVersion` 实测 `0.0.1-Alpha-1`）。
+>      ⚠️ `docs\UI_KIT*.md` 里旧日志摘录中的 `v0.1.0` 是**当时实测取证**，不随版本号改写。
+>   ③ **打包**（命名对齐家族 `OpenNestUIKit-<ver>-<Loader>.zip`，脚本 `scripts\package.ps1`）：
+>      `OpenNestUIKit-0.0.1-Alpha-1-BepInEx.zip`（169 KB，`BepInEx\plugins\{OpenNestUIKit,OpenNestUIKit.API}.dll`）、
+>      `OpenNestUIKit-0.0.1-Alpha-1-MelonLoader.zip`（168 KB，`Mods\OpenNestUIKit.MelonMod.dll` + `UserLibs\OpenNestUIKit.API.dll`），
+>      各带双语 `README.txt`；`release/` 不入库（`.gitignore`）。
+>   ④ **已发布**（2026-09-13）：公开仓库 <https://github.com/1499501762/Open-Nest-UIKit>（commit `1abcd5a`，tag `v0.0.1-Alpha-1`），
+>      Release id `387838334`，**已勾 Pre-release**，正文 = `docs/RELEASE_NOTES.md`，资产 = 上述两个 zip（168.8 / 168.6 KB）；
+>      topics = `bepinex, bepinex-plugin, il2cpp, iron-nest, melonloader, ui, ui-library, unity-mod`。
+>      发布前脱敏：本机路径/用户名 = 0、闭源模组名 = 0（`UiInputGuard.cs` 里引用了某个闭源模组的类型名，
+>      已改成“官方联机 UI 用的也是这一档”—— **公开树里连名字都不要出现**）。
+>      **克隆校验**：`git clone --branch v0.0.1-Alpha-1` → 94 文件 → 双端 `dotnet build` 0 错（BepInEx 0 警 / ML 端仅 0Harmony 引用告警，属本机环境）。
+>      发布手法与三条坑（PS 脚本必须纯 ASCII、`$ErrorActionPreference='Stop'` 会被 git stderr 误伤、
+>      `ConvertTo-Json` 把长正文膨胀成 454 KB 被 GitHub 拒）见新仓库 `docs\PUBLISH.md` §六。
+>   ⑤ 主仓库同步关系：UIKit 源码双仓维护，改动后按 `docs\PUBLISH.md` §五 覆盖拷贝（`robocopy /XD bin obj`）。
+
 > - 2026-09-13（三十二）**填充起点缺口 / 手柄与滚动条手柄颜色对齐原生**（用户：“拖拽条起始位置空一块”“Handle 应该是和原生一样颜色的，
 >   滚动条的也一样”“圆现在是正常的”）：
 >   ① **拖拽条起始（也是两端）为何空一块**：原生 `Fill Area` 是 `尺寸=-20x0 pos=(-5,0)`（左右各内缩 10 再整体左移 5）

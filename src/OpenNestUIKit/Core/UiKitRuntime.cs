@@ -87,6 +87,13 @@ public static class UiKitRuntime
                 () => Menu.UiMenuWindow.ReloadCurrentPage(),
                 () => Menu.UiMenuWindow.CurrentPage,
                 () => Native.UiPointerRouter.TextFocus);
+            // v0.0.1-Alpha-3：确认框 / 滚动定位（第三方契约的 Confirm / ScrollToKey / ScrollToTop）
+            UiKitHost.SetViewControls(
+                (payload, onResult) => Menu.UiMenuWindow.ShowConfirm(payload, onResult),
+                key => Menu.UiMenuWindow.ScrollToKey(key),
+                () => Menu.UiMenuWindow.ScrollTop());
+            // 语言：把当前语言推给契约（第三方用 API.UiKitLang.T 写双语）；切换时由 UiMenuWindow.Tick 再推
+            try { API.UiKitLang.SetChinese(Core.UiKitLoc.IsChinese); } catch { }
             CoopLog.Info("uikit.start", () => $"contract host ready (api={UiKitHost.ApiVersion}, providers={UiKitHost.ProviderCount})");
         }
         catch (Exception ex) { CoopLog.Error("uikit.start", () => $"MarkHostAvailable failed: {ex.Message}"); }
@@ -122,6 +129,8 @@ public static class UiKitRuntime
 
         try { UiKitHost.Changed -= OnProvidersChanged; } catch { }
         try { UiKitHost.SetMenuControls(null, null, null); } catch { }
+        try { UiKitHost.SetViewControls(null, null, null); } catch { }
+
         try { UiEscapeLevels.Clear(); } catch { }
         try { UiSliceStore.Changed -= OnSlicesChanged; } catch { }
         try { NativeMenuInjector.Detach(); } catch { }

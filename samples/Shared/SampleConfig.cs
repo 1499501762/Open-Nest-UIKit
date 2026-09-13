@@ -15,6 +15,15 @@ public sealed class SampleConfig
     public int ModeIndex = 1;
     public string Callsign = "Gunner";
     public string Hotkey = "F8";
+    public int Slots = 4;
+    public bool Verbose = false;
+    public double TickRate = 20;
+    public int RegionIndex = 0;
+
+    private static readonly string[] Regions = { "Europe", "North America", "Asia" };
+
+    public string RegionName()
+        => (RegionIndex >= 0 && RegionIndex < Regions.Length) ? Regions[RegionIndex] : "?";
 
     /// <summary>Called by the sample after every change (a real mod writes its config file here).</summary>
     public void Save()
@@ -29,6 +38,10 @@ public sealed class SampleConfig
         ModeIndex = 1;
         Callsign = "Gunner";
         Hotkey = "F8";
+        Slots = 4;
+        Verbose = false;
+        TickRate = 20;
+        RegionIndex = 0;
         Save();
     }
 }

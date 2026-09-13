@@ -392,7 +392,7 @@ public sealed class UiStepper : UiWidget
 
     /// <summary>创建步进器。</summary>
     public static UiStepper Create(Transform parent, string label, double value, double min, double max, double step,
-        Action<double> onChanged, float height = 0f)
+        Action<double> onChanged, float height = 0f, string zoneName = null)
     {
         var rt = NewRect("stepper", parent);
         float h = height > 0f ? height : Theme.UiTheme.RowH;
@@ -409,6 +409,16 @@ public sealed class UiStepper : UiWidget
             _step = step > 0 ? step : 1,
             OnChanged = onChanged,
         };
+
+        // 整行热区：**先登记 = 优先级最低**，所以左右按钮仍然是它们自己接管点击。
+        // 存在的意义：① 第三方的动态悬停提示（HintFunc）能绑到这一行；② 探针/自动化可按名字定位。
+        Native.UiPointerRouter.Add(new Native.UiHotZone
+        {
+            Name = string.IsNullOrEmpty(zoneName) ? "stepper:" + label : zoneName,
+            Rect = rt,
+            Owner = st,
+            Tint = false,
+        });
 
         const float bw = Theme.UiTheme.StepperBtnW;
         var minus = UiButton.Create(rt, "-", () => st.Add(-st._step), UiButtonStyle.Secondary, bw, Theme.UiTheme.ControlH);
@@ -495,7 +505,7 @@ public sealed class UiChoice : UiWidget
     public string Selected => (_choices != null && _index >= 0 && _index < _choices.Length) ? _choices[_index] : "";
 
     /// <summary>创建循环选择。</summary>
-    public static UiChoice Create(Transform parent, string label, string[] choices, int selected, Action<int> onChanged, float height = 0f)
+    public static UiChoice Create(Transform parent, string label, string[] choices, int selected, Action<int> onChanged, float height = 0f, string zoneName = null)
     {
         var rt = NewRect("choice", parent);
         float h = height > 0f ? height : Theme.UiTheme.RowH;
@@ -506,6 +516,15 @@ public sealed class UiChoice : UiWidget
         txt.Rect.sizeDelta = new Vector2(120f, h);
 
         var ch = new UiChoice(rt, txt, null) { _choices = choices ?? new string[0], OnChanged = onChanged };
+
+        // 整行热区：先登记 = 优先级最低 ⇒ 左右 `<`/`>` 按钮（后建）仍然优先命中。
+        Native.UiPointerRouter.Add(new Native.UiHotZone
+        {
+            Name = string.IsNullOrEmpty(zoneName) ? "choice:" + label : zoneName,
+            Rect = rt,
+            Owner = ch,
+            Tint = false,
+        });
 
         const float bw = 22f, vw = 150f;
         var prev = UiButton.Create(rt, "<", () => ch.Move(-1), UiButtonStyle.Secondary, bw, Theme.UiTheme.ControlH);

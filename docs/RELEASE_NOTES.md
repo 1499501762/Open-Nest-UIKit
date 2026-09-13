@@ -1,5 +1,83 @@
 # Open Nest UIKit — Release Notes
 
+## `0.0.1-Alpha-3` — a bigger third-party widget set, dialogs, scrolling and localisation
+
+Everything below was verified **in-game** (scripted clicks + screenshots, BepInEx 6 end): the new
+rows render as native widgets, the foldout expands/collapses and the list keeps its selection
+highlight.
+
+### New rows
+
+| Row | What it gives you |
+|---|---|
+| `Stepper(key, label, value, min, max, step, onChanged)` | the native `− value +` numeric row (game-faithful, for precise small ranges) |
+| `Foldout(key, label, expanded, onToggle, body)` | collapsible group; `body` is only invoked while expanded, and the host rebuilds the page after a toggle (you only store the state). Rendered with a **procedural triangle arrow** — see "font/atlases below" |
+| `SelectableList(key, height, items, selected, onSelected)` | scrolling list with exactly one highlighted row: "pick one, then act" without a button per row |
+| `Text(..., placeholder, maxLength)` | grey placeholder when empty + hard character limit enforced through the IME/keyboard pipeline |
+
+### Row modifiers and naming parity
+
+- `Hint(string)` / `Hint(Func<string>)` — static or **dynamic** hover text for a row
+  (`() => "now " + value`), plus `MarkSelected()` for hand-built lists.
+- `Bool(key, label, value, onChanged)`, `Number(...)`, `Action(...)` are now provided as aliases of
+  `Toggle` / `Slider` / `Button`, named exactly as in `OpenNestModMenu.API` — a settings page can be
+  written once for both mods.
+
+### Host controls
+
+| API | Behaviour |
+|---|---|
+| `UiKitHost.Confirm(title, body, onResult)` | native modal confirm dialog (mask + title/body + OK/Cancel); ESC cancels without closing the menu; if the menu is closed the call warns and answers `false` instead of hanging |
+| `UiKitHost.CanShowDialog` | whether a host provides the dialog |
+| `UiKitHost.ScrollToKey(key)` / `ScrollToTop()` | bring a declared row into view (no-op when it is already fully visible), or jump back to the top |
+| `UiKitHost.PageChanged` | `(oldId, newId)` on open / navigate / back / close — the clean hook for lazy data instead of doing work in `BuildMenu` |
+
+### Localisation and reset
+
+- **`UiKitLang.T(zh, en)`** (+ `IsChinese`, `Changed`) lets third-party pages follow the game
+  language; the host pushes the current language. (Named `UiKitLang` because the host assembly has
+  an internal `UiKitLoc` of its own — a same-named contract type would collide.)
+- **`IUiKitDefaults.ResetToDefaults()`** — implementing it makes the host append a "Reset to
+  defaults" row to your root page; clicking it asks for confirmation first, and the host refreshes
+  afterwards. Same name and meaning as `OpenNestModMenu.API.IModMenuProvider.ResetToDefaults`.
+
+### Fixed along the way
+
+- **The foldout arrow is drawn, not typed.** `▾` (U+25BE) / `▸` (U+25B8) have **no glyph in the
+  game font** — the first attempt rendered as a gold tofu box on screen. The arrow is now a
+  procedurally generated triangle sprite (rotated for open/closed), the same approach the slider
+  knob already uses: when a font or atlas cannot give the native shape, draw it.
+- **Hover tooltips can no longer break row interaction.** The generic "row hot zone" that backs
+  dynamic hints is only added to **read-only** rows; interactive widgets register their own
+  row-level zone *before* their sub-controls, so `<`/`>`/`+`/`-`/tabs keep receiving clicks
+  (zones registered later win hit-testing).
+- `UiActionRow`'s whole-row hot zone now declares its owner (it was anonymous, which made the
+  renderer treat the row as "no zone" and add a duplicate one).
+
+### Build status
+
+Four projects (mod × 2 loaders, sample × 2 shells) compile with **0 errors / 0 warnings** on the
+BepInEx end; the scripted in-game run reported `PASS=11 FAIL=0` and the follow-up interaction run
+passed every step (foldout toggle, list selection, stepper ±, confirm dialog).
+
+### Installation
+
+```
+BepInEx    : OpenNestUIKit.dll + OpenNestUIKit.API.dll  ->  <Game>/BepInEx/plugins/
+MelonLoader: OpenNestUIKit.MelonMod.dll                 ->  <Game>/Mods/
+             OpenNestUIKit.API.dll                      ->  <Game>/UserLibs/
+```
+
+### Known limits
+
+- **Only two of four loader combinations are verified** (BepInEx-with-bridge and native
+  MelonLoader); the other two have no test environment here.
+- The public API is alpha: breaking changes bump `UiKitHost.ApiVersion`.
+- `Confirm` requires the menu to be open (documented above).
+- `Foldout`/`SelectableList` state is yours to keep — the host only renders and rebuilds.
+
+---
+
 ## `0.0.1-Alpha-2` — API reference + sample mod
 
 A documentation-and-example release: **no behaviour change** in the shipped binaries (the only

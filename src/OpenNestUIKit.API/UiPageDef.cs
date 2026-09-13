@@ -36,6 +36,7 @@ public interface IUiPageDef
 public sealed class UiPageDef : IUiPageDef
 {
     private readonly List<UiRow> _rows = new();
+    private UiRow _last;        // 最近加的一行（Hint/MarkSelected 修饰它）
 
     public UiPageDef(string id, string title)
     {
@@ -208,7 +209,7 @@ public sealed class UiPageDef : IUiPageDef
         });
     }
 
-    /// <summary>文本输入。</summary>
+    /// <summary>文本输入。<paramref name="placeholder"/> = 空文本时的灰色占位；<paramref name="maxLength"/> &lt;= 0 = 不限制。</summary>
     public UiPageDef Text(string key, string label, string value, Action<string> onChanged)
         => Add(new UiRow
         {
@@ -222,6 +223,18 @@ public sealed class UiPageDef : IUiPageDef
                 return true;
             },
         });
+
+    /// <summary>文本输入（带占位提示与最大长度）。</summary>
+    public UiPageDef Text(string key, string label, string value, Action<string> onChanged, string placeholder, int maxLength = 0)
+    {
+        Text(key, label, value, onChanged);
+        if (_last != null)
+        {
+            _last.Placeholder = placeholder;
+            _last.MaxLength = maxLength > 0 ? maxLength : 0;
+        }
+        return this;
+    }
 
     /// <summary>快捷键绑定。</summary>
     public UiPageDef KeyBind(string key, string label, string current, Action<string> onChanged)
@@ -268,12 +281,127 @@ public sealed class UiPageDef : IUiPageDef
         });
     }
 
+    /// <summary>
+    /// **可选中的列表**（固定高 + 自带滚动条，条目带选中高亮）：选一个才能做下一步时用它。
+    /// 回调给你选中索引；宿主不做任何记忆，重建页面时你自己把 <paramref name="selected"/> 传回来。
+    /// </summary>
+    public UiPageDef SelectableList(string key, float height, IReadOnlyList<string> items, int selected, Action<int> onSelected)
+    {
+        var arr = new List<string>();
+        if (items != null) for (int i = 0; i < items.Count; i++) arr.Add(items[i]);
+        return Add(new UiRow
+        {
+            Kind = UiRowKind.SelectableList,
+            Key = key,
+            ListHeight = height > 40f ? height : 240f,
+            Choices = arr,
+            Value = Math.Max(0, Math.Min(arr.Count, selected)).ToString(),
+            Write = v =>
+            {
+                if (!int.TryParse(v, out int i)) return false;
+                onSelected?.Invoke(i);
+                return true;
+            },
+            ReadOnly = true,
+        });
+    }
+
+    /// <summary>
+    /// **± 步进数值行**（`− 12 +`）：与 <see cref="Slider"/> 同参数，但渲染成原生数值行（左右箭头 + 中间值），
+    /// 适合精确小范围数值。
+    /// </summary>
+    public UiPageDef Stepper(string key, string label, double value, double min, double max, double step, Action<double> onChanged)
+        => Add(new UiRow
+        {
+            Kind = UiRowKind.Stepper,
+            Key = key,
+            Label = label ?? key ?? "",
+            Value = Num(value),
+            Min = min,
+            Max = max > min ? max : min + 1,
+            Step = step > 0 ? step : 1,
+            Write = v =>
+            {
+                if (!double.TryParse(v, System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out double d)) return false;
+                onChanged?.Invoke(d);
+                return true;
+            },
+        });
+
+    /// <summary>
+    /// **可折叠分组**（`▾ 分组名`）：展开的子行由 <paramref name="body"/> 声明，**展开时直接进入页面流**
+    /// （不另开滚动区）。展开/收起状态由调用方保存（回调给你新值，通常接着 <c>UiKitHost.Refresh()</c>）。
+    /// </summary>
+    public UiPageDef Foldout(string key, string label, bool expanded, Action<bool> onToggle, Action<UiPageDef> body)
+    {
+        var inner = new UiPageDef(Id + "#fold:" + (key ?? ""), "foldout");
+        if (expanded) { try { body?.Invoke(inner); } catch { } }
+        return Add(new UiRow
+        {
+            Kind = UiRowKind.Foldout,
+            Key = key,
+            Label = label ?? key ?? "",
+            Value = expanded ? "true" : "false",
+            ListRows = inner.Rows,
+            Write = v =>
+            {
+                onToggle?.Invoke(ParseBool(v));
+                return true;
+            },
+        });
+    }
+
     /// <summary>把已有行加进来（高级用法：宿主/第三方自己构造 <see cref="UiRow"/>）。</summary>
     public UiPageDef Add(UiRow row)
     {
-        if (row != null) _rows.Add(row);
+        if (row != null)
+        {
+            _rows.Add(row);
+            _last = row;
+        }
         return this;
     }
+
+    // ---------------- 对上一行的修饰（链式；要写在那一行之后） ----------------
+
+    /// <summary>给**刚加的那一行**加静态副说明（灰色小字 / 悬停提示）。</summary>
+    public UiPageDef Hint(string text)
+    {
+        if (_last != null) _last.Hint = text;
+        return this;
+    }
+
+    /// <summary>
+    /// 给**刚加的那一行**加**动态副说明**：鼠标悬停时取一次文本（如“当前值 = 12”）。
+    /// 比静态 <see cref="Hint(string)"/> 适合会变的状态；写了它就不画静态那行。
+    /// </summary>
+    public UiPageDef Hint(Func<string> text)
+    {
+        if (_last != null) _last.HintFunc = text;
+        return this;
+    }
+
+    /// <summary>标记“刚加的那一行”为选中态（手搓列表时用；<see cref="SelectableList"/> 不用）。</summary>
+    public UiPageDef MarkSelected(bool selected = true)
+    {
+        if (_last != null) _last.Selected = selected;
+        return this;
+    }
+
+    // ---------------- 与 OpenNestModMenu.API 同名的别名（一份代码两处可用） ----------------
+
+    /// <summary><see cref="Toggle"/> 的别名（与 <c>OpenNestModMenu.API.IModMenuPage.Bool</c> 同名）。</summary>
+    public UiPageDef Bool(string key, string label, bool value, Action<bool> onChanged)
+        => Toggle(key, label, value, onChanged);
+
+    /// <summary><see cref="Slider"/> 的别名（与 <c>IModMenuPage.Number</c> 同名）。</summary>
+    public UiPageDef Number(string key, string label, double value, double min, double max, double step, Action<double> onChanged)
+        => Slider(key, label, value, min, max, step, onChanged);
+
+    /// <summary><see cref="Button"/> 的别名（与 <c>IModMenuPage.Action</c> 同名）。</summary>
+    public UiPageDef Action(string label, string buttonText, Action onClick)
+        => Button(label, buttonText, onClick);
 
     private static bool ParseBool(string v)
     {

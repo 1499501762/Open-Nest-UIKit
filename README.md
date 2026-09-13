@@ -13,7 +13,7 @@ A standalone library that gives other mods two things the game does not expose:
 Works with **BepInEx 6 (IL2CPP)** and **MelonLoader 0.7.3**, including when MelonLoader
 mods run inside a BepInEx process through the `BepInEx.MelonLoader.Loader` bridge.
 
-> **Status: `0.0.1-Alpha-2` — public alpha (pre-release).**
+> **Status: `0.0.1-Alpha-3` — public alpha (pre-release).**
 > The native page, the widget set, the third-party contract, input isolation and the
 > dual-loader packaging are implemented and verified in-game on both loaders. The public
 > contract may still change between alpha builds.
@@ -102,15 +102,19 @@ UiKitHost.OpenMenu("provider:mymod");
 ```
 
 Rows available today: `Header`, `Label`, `Separator`, `Button`, `Nav`, `Toggle`, `Slider`,
-`Choice` (dropdown), `Tabs`, `Text`, `KeyBind`, `Progress`, `Columns` (two-column layout),
-`List` (embedded scroller), plus page sizing (`Size`) and density (`SetCompact`).
+`Stepper`, `Choice` (dropdown), `Tabs`, `Text` (placeholder + max length), `KeyBind`, `Progress`,
+`Foldout` (collapsible group), `SelectableList`, `Columns` (two-column layout), `List` (embedded
+scroller), plus `Hint(text)` / `Hint(Func<string>)` row hints, page sizing (`Size`), density
+(`SetCompact`) and the ModMenu-compatible aliases (`Bool` / `Number` / `Action`).
 
 `UiKitHost` is the host-side contract: `Register`/`Unregister` providers, `OpenMenu`/
-`CloseMenu`/`ToggleMenu`/`Refresh`, `IsMenuOpen`/`CurrentPageId`/`IsTextInputFocused`, and
-the chat overlay (`SetChat`/`FocusChat`/`CloseChat`). It is a **soft dependency** — a mod
-that references only `OpenNestUIKit.API.dll` still loads when this mod is absent,
+`CloseMenu`/`ToggleMenu`/`Refresh`, `IsMenuOpen`/`CurrentPageId`/`IsTextInputFocused`,
+`PageChanged`, `Confirm` (native modal), `ScrollToKey`/`ScrollToTop`, the chat overlay
+(`SetChat`/`FocusChat`/`CloseChat`) and `UiKitLang` for bilingual pages. It is a **soft dependency**
+— a mod that references only `OpenNestUIKit.API.dll` still loads when this mod is absent,
 `IsHostAvailable` is `false`, and the calls do nothing. Every provider also gets a row in the
-game's own ESC list (`IUiKitNativeEntry` changes or disables it).
+game's own ESC list (`IUiKitNativeEntry` changes or disables it), and implementing the optional
+`IUiKitDefaults` adds a confirmed "Reset to defaults" row to your root page.
 
 The contract is versioned (`UiKitHost.ApiVersion`); a breaking change bumps it.
 
@@ -215,6 +219,9 @@ Full design notes: [docs/UI_KIT.md](docs/UI_KIT.md).
 | U7 | In-game test harness with scripted input and geometry probes | ✅ |
 | U8 | Rubber-band scrolling, squared-up handle travel, native handle colours | ✅ |
 | U9 | Public API documentation (`docs/API.md`) and sample mod | ✅ |
+| U11 | `Stepper` / `Foldout` / `SelectableList` rows, dynamic `Hint`, `Text` placeholder + max length | ✅ |
+| U12 | Host controls: native `Confirm` dialog, `ScrollToKey` / `ScrollToTop`, `PageChanged`, `UiKitLang`, `IUiKitDefaults` | ✅ |
+| U13 | Naming parity with `OpenNestModMenu.API` (`Bool` / `Number` / `Action` aliases) | ✅ |
 | U10 | Cross-loader test matrix (BepInEx without bridge, MelonLoader build inside BepInEx) | ⏳ |
 
 **Test matrix (honest scope):** verified in-game on **G-side** (BepInEx 6 + bridge) and

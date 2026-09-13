@@ -176,7 +176,38 @@ public static class UiPointerRouter
         }
         return null;
     }
+    /// <summary>
+    /// 按归属对象找热区（后登记优先）。声明式行渲染后用它把**动态悬停提示**（<c>UiTooltip</c>）
+    /// 挂到那一行的热区上 —— 否则控件工厂不返回热区，外部拿不到"这行是哪个热区"。
+    /// </summary>
+    public static UiHotZone FindZoneOf(object owner)
+    {
+        if (owner == null) return null;
+        for (int i = _zones.Count - 1; i >= 0; i--)
+        {
+            var z = _zones[i];
+            if (z == null || z.Rect == null) continue;
+            try { if (ReferenceEquals(z.Owner, owner)) return z; } catch { }
+        }
+        return null;
+    }
 
+    /// <summary>
+    /// 取某个归属对象的**全部**热区（一个控件可能有多个：页签的每列、列表的每行…），
+    /// 后登记优先的顺序不变。绑定悬停提示时要全部绑上，否则只生效在最后一列上。
+    /// </summary>
+    public static UiHotZone[] ZonesOf(object owner)
+    {
+        if (owner == null) return System.Array.Empty<UiHotZone>();
+        var list = new System.Collections.Generic.List<UiHotZone>(4);
+        for (int i = _zones.Count - 1; i >= 0; i--)
+        {
+            var z = _zones[i];
+            if (z == null || z.Rect == null) continue;
+            try { if (ReferenceEquals(z.Owner, owner)) list.Add(z); } catch { }
+        }
+        return list.ToArray();
+    }
     /// <summary>取热区中心的屏幕坐标（供模拟点击对准）。</summary>
     public static bool TryGetScreenCenter(UiHotZone zone, out Vector2 screenPos)
     {

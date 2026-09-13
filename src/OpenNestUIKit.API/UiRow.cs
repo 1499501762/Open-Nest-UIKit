@@ -46,6 +46,30 @@ public enum UiRowKind
     /// 用途：模组列表 / 房间列表这类“行数不确定、应该自己滞动而不是把整页撑长”的区域。
     /// </summary>
     List = 13,
+
+    /// <summary>
+    /// **± 步进数值**（`− 12 +`）：与 <see cref="Slider"/> 同一个 <see cref="UiRow.Min"/>/<see cref="UiRow.Max"/>/<see cref="UiRow.Step"/> 语义，
+    /// 宿主渲染成原生“数值行”（游戏设置页那种左右箭头 + 中间数值）。
+    /// 用途：精确小范围数值（速度/音量档位），比滑条好点。
+    /// </summary>
+    Stepper = 14,
+
+    /// <summary>
+    /// **可折叠分组**（`▾ 分组名`）：<see cref="UiRow.Value"/> = "true"/"false" 表示展开/收起，
+    /// <see cref="UiRow.ListRows"/> 是组内子行（展开时才渲染，展开的行直接进入页面流，不另开滚动区）。
+    ///
+    /// 用途：长设置页分组收纳（ImGui TreeNode / UIElements Foldout / ConfigManager 分区）。
+    /// </summary>
+    Foldout = 15,
+
+    /// <summary>
+    /// **可选中的列表**（固定高 + 自带滚动条，每项是一行带选中高亮的条目）：
+    /// <see cref="UiRow.Choices"/> = 条目文本，<see cref="UiRow.Value"/> = 当前选中索引，
+    /// <see cref="UiRow.Selected"/> 在**手搓行**（<c>Add</c>）时用来单行标记选中。
+    ///
+    /// 用途：列表+详情布局（选一个才能做下一步），比“每行一个按钮”语义清楚。
+    /// </summary>
+    SelectableList = 16,
 }
 
 /// <summary>
@@ -66,8 +90,20 @@ public sealed class UiRow
     public string Value { get; set; }
     /// <summary>副说明（灰色小字，可空）。</summary>
     public string Hint { get; set; }
+    /// <summary>
+    /// **动态副说明 / 悬停提示**（可空）：设了它，鼠标悬停在该行上时显示一行实时文本
+    /// （如“当前值 = 12”“按住 Shift 可批量”），比固定的 <see cref="Hint"/> 更适合会变的状态。
+    /// 优先级高于 <see cref="Hint"/>（有动态就不再画静态那行）。
+    /// </summary>
+    public System.Func<string> HintFunc { get; set; }
     /// <summary>只读（界面不可改）。</summary>
     public bool ReadOnly { get; set; }
+    /// <summary>选中态（仅 <see cref="UiRowKind.SelectableList"/> 与手搓的 Button/Nav 行）：宿主画成选中高亮。</summary>
+    public bool Selected { get; set; }
+    /// <summary>空文本时的灰色占位提示（仅 <see cref="UiRowKind.Text"/>，可空）。</summary>
+    public string Placeholder { get; set; }
+    /// <summary>最大字符数（仅 <see cref="UiRowKind.Text"/>；&lt;= 0 = 不限制）。超出部分输入时就被截断。</summary>
+    public int MaxLength { get; set; }
     /// <summary>子菜单目标页 id（仅 <see cref="UiRowKind.Nav"/>）。</summary>
     public string PageId { get; set; }
     /// <summary>选项列表（仅 <see cref="UiRowKind.Choice"/>）。</summary>
@@ -95,11 +131,11 @@ public sealed class UiRow
     /// <summary>右栏子行。</summary>
     public IReadOnlyList<UiRow> RightRows { get; set; }
 
-    // ---------------- 内嵌列表（仅 <see cref="UiRowKind.List"/>） ----------------
+    // ---------------- 内嵌列表（仅 <see cref="UiRowKind.List"/> 与 <see cref="UiRowKind.SelectableList"/>） ----------------
 
     /// <summary>列表高度（像素；0 = 取一个默认值）。</summary>
     public float ListHeight { get; set; }
 
-    /// <summary>列表里的行。</summary>
+    /// <summary>列表里的行（<see cref="UiRowKind.List"/> / <see cref="UiRowKind.Foldout"/> 的子行）。</summary>
     public IReadOnlyList<UiRow> ListRows { get; set; }
 }

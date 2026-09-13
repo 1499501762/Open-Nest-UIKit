@@ -201,6 +201,33 @@ public static class ProviderPages
                     });
                 }
 
+                // 3) 可选接口 IUiKitDefaults：替第三方在根页底部放一个「恢复默认」（带确认框）。
+                //    与 ModMenu 的 IModMenuProvider.ResetToDefaults 同名同义 —— 第三方不用自己拼这一行，
+                //    也保证“重置前一定先问一句”是全家族一致的交互。
+                if (p is IUiKitDefaults defaults)
+                {
+                    string who = SafeName(p);
+                    rootRows.Add(new UiRow { Kind = UiRowKind.Separator, ReadOnly = true });
+                    rootRows.Add(new UiRow
+                    {
+                        Kind = UiRowKind.Button,
+                        Key = "uikit.reset",
+                        Label = UiKitLoc.T("恢复默认设置", "Reset to defaults"),
+                        Value = UiKitLoc.T("重置", "Reset"),
+                        ReadOnly = true,
+                        OnClick = () => UiKitHost.Confirm(
+                            UiKitLoc.T("恢复默认设置", "Reset to defaults"),
+                            UiKitLoc.T("确定要把「" + who + "」的设置恢复成默认值吗？",
+                                       "Reset " + who + " to its default settings?"),
+                            ok =>
+                            {
+                                if (!ok) return;
+                                try { defaults.ResetToDefaults(); } catch (Exception ex) { CoopLog.Warn("uikit.ui", () => "ResetToDefaults failed: " + ex.Message); }
+                                try { UiKitHost.Refresh(); } catch { }
+                            }),
+                    });
+                }
+
                 register(new DeclarativePage(rootId, SafeName(p), rootRows, id => UiPageCatalog.Get(id), rootDef));
 
                 // 2) 每个声明页

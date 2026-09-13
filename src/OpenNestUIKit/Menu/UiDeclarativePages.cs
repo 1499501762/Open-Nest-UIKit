@@ -23,6 +23,8 @@ public sealed class DeclarativePage : UiPage
     private readonly IUiPageDef _def;
     private readonly List<Widgets.UiWidget> _widgets = new();
     private readonly List<RectTransform> _extras = new();       // 自建容器（两栏等；不属 UiWidget）
+    private readonly Dictionary<string, Widgets.UiWidget> _byKey = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<Native.UiHotZone> _hintBound = new();     // 已绑过悬停提示的热区（防重复串联）
     private Widgets.UiList _list;
 
     public DeclarativePage(string id, string title, IReadOnlyList<UiRow> rows, Func<string, UiPage> resolveNav, IUiPageDef def = null)
@@ -46,9 +48,25 @@ public sealed class DeclarativePage : UiPage
     {
         _widgets.Clear();
         _extras.Clear();
+        _byKey.Clear();
+        _hintBound.Clear();
         _list = Widgets.UiList.Create(parent, 520f);
         Root = _list.Rect;
         Render();
+    }
+
+    /// <summary>把某一项滚到可见位置（<c>UiKitHost.ScrollToKey</c> 最终走到这里）。</summary>
+    public override bool ScrollToKey(string key)
+    {
+        if (string.IsNullOrEmpty(key) || _list == null) return false;
+        if (!_byKey.TryGetValue(key, out var w) || w == null) return false;
+        return _list.ScrollToWidget(w);
+    }
+
+    /// <summary>滚回顶部。</summary>
+    public override void ScrollTop()
+    {
+        try { _list?.ScrollTop(); } catch { }
     }
 
     private void Render()
@@ -61,7 +79,11 @@ public sealed class DeclarativePage : UiPage
             {
                 var row = _rows[i];
                 var w = BuildRow(row, flow);
-                if (w != null) _widgets.Add(w);
+                if (w != null)
+                {
+                    _widgets.Add(w);
+                    Index(w, row);
+                }
             }
             _list.ApplyLayout();
         }
@@ -88,7 +110,7 @@ public sealed class DeclarativePage : UiPage
                     {
                         var page = _resolveNav != null ? _resolveNav(target) : null;
                         UiMenuWindow.Navigate(target);
-                    });
+                    }, selected: row.Selected);
                     return Add(flow, nav, Layout.UiSize.Auto);
                 }
 
@@ -116,12 +138,12 @@ public sealed class DeclarativePage : UiPage
                     if (row.Choices != null) for (int k = 0; k < row.Choices.Count; k++) arr.Add(row.Choices[k]);
                     int sel = arr.IndexOf(row.Value ?? "");
                     return Add(flow, Widgets.UiChoice.Create(flow.Rect, row.Label, arr.ToArray(), sel,
-                        i => Write(row, i >= 0 && i < arr.Count ? arr[i] : "")), Layout.UiSize.Auto);
+                        i => Write(row, i >= 0 && i < arr.Count ? arr[i] : ""), zoneName: "choice:" + row.Key), Layout.UiSize.Auto);
                 }
 
             case UiRowKind.Text:
                 return Add(flow, Widgets.UiTextInput.Create(flow.Rect, row.Label, row.Value, v => Write(row, v),
-                    zoneName: "input:" + row.Key), Layout.UiSize.Auto);
+                    height: 0f, zoneName: "input:" + row.Key, placeholder: row.Placeholder, maxLength: row.MaxLength), Layout.UiSize.Auto);
 
             case UiRowKind.KeyBind:
                 return Add(flow, Widgets.UiKeyBind.Create(flow.Rect, row.Label, row.Value, v => Write(row, v)), Layout.UiSize.Auto);
@@ -145,8 +167,90 @@ public sealed class DeclarativePage : UiPage
             case UiRowKind.List:
                 return BuildNestedList(row, flow);
 
+            case UiRowKind.Stepper:
+                {
+                    double cur = ParseNum(row.Value, row.Min);
+                    return Add(flow, Widgets.UiStepper.Create(flow.Rect, row.Label, cur, row.Min, row.Max, row.Step,
+                        v => Write(row, v.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture)),
+                        zoneName: "stepper:" + row.Key), Layout.UiSize.Auto);
+                }
+
+            case UiRowKind.Foldout:
+                return BuildFoldout(row, flow);
+
+            case UiRowKind.SelectableList:
+                return BuildSelectableList(row, flow);
+
             default:
                 return null;
+        }
+    }
+
+    /// <summary>
+    /// 可折叠分组：头行（▾/▸ + 标题）可点 → 把新状态写回 → 调用方 Refresh 后重建页面；
+    /// 展开时子行**直接进入页面流**（不另开滚动区，也不会跟外层滚动打架）。
+    /// </summary>
+    private Widgets.UiWidget BuildFoldout(UiRow row, Layout.UiFlow flow)
+    {
+        try
+        {
+            bool open = string.Equals(row.Value, "true", StringComparison.OrdinalIgnoreCase);
+            var head = Widgets.UiNavRow.Create(flow.Rect, row.Label, null,
+                () =>
+                {
+                    Write(row, open ? "false" : "true");
+                    // 展开/收起改变了页面的行组成 ⇒ 必须重建（第三方只需在回调里**保存**状态，不用自己 Refresh）。
+                    UiMenuWindow.ReloadCurrentPage();
+                }, zoneName: "fold:" + row.Key, selected: open, triangleArrow: true);
+            head.SetArrowExpanded(open);
+            Add(flow, head, Layout.UiSize.Auto);
+            if (open) BuildRows(row.ListRows, flow);
+            return head;
+        }
+        catch (Exception ex)
+        {
+            CoopLog.Warn("uikit.ui", () => "foldout build failed: " + ex.Message);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 可选中的列表：条目用导航行但**不上页面栈** —— 点击只把索引写回（选中高亮由调用方重建时带回来）。
+    /// </summary>
+    private Widgets.UiWidget BuildSelectableList(UiRow row, Layout.UiFlow flow)
+    {
+        try
+        {
+            var items = new List<string>();
+            if (row.Choices != null) for (int i = 0; i < row.Choices.Count; i++) items.Add(row.Choices[i]);
+
+            float h = row.ListHeight > 40f ? row.ListHeight : 240f;
+            var list = Widgets.UiList.Create(flow.Rect, h, !string.IsNullOrEmpty(row.Key) ? row.Key : "select");
+            _widgets.Add(list);
+
+            int sel = 0;
+            try { int.TryParse(row.Value, out sel); } catch { }
+
+            for (int i = 0; i < items.Count; i++)
+            {
+                int index = i;
+                var nav = Widgets.UiNavRow.Create(list.Flow.Rect, items[i], null,
+                    () =>
+                    {
+                        Write(row, index.ToString());
+                        UiMenuWindow.ReloadCurrentPage();      // 选中高亮要重画（第三方只需保存索引）
+                    }, zoneName: "pick:" + (row.Key ?? "") + ":" + index,
+                    selected: index == sel, arrowText: "");
+                list.Add(nav, Layout.UiSize.Auto);
+            }
+            list.ApplyLayout();
+            flow.Child(new Layout.RectElement(list.Rect), Layout.UiSize.Fixed(h));
+            return list;
+        }
+        catch (Exception ex)
+        {
+            CoopLog.Warn("uikit.ui", () => "selectable list build failed: " + ex.Message);
+            return null;
         }
     }
 
@@ -248,9 +352,65 @@ public sealed class DeclarativePage : UiPage
         for (int i = 0; i < rows.Count; i++)
         {
             var w = BuildRow(rows[i], flow);
-            if (w != null) _widgets.Add(w);
+            if (w != null)
+            {
+                _widgets.Add(w);
+                Index(w, rows[i]);
+            }
         }
     }
+
+    /// <summary>
+    /// 登记一行：① 按 <see cref="UiRow.Key"/> 建索引（供 <c>UiKitHost.ScrollToKey</c>）；
+    /// ② 没热区的行补一个行热区，并把 <see cref="UiRow.HintFunc"/>/<see cref="UiRow.Hint"/> 绑成悬停提示。
+    ///
+    /// 为什么在这里做而不是逐个控件工厂做：控件工厂有 10+ 个，且只有“第三方声明式页面”需要这两个能力；
+    /// 统一在渲染管线里补，改动面最小（开关/滑条/输入框/导航行本来就有热区，直接复用）。
+    /// </summary>
+    private void Index(Widgets.UiWidget w, UiRow row)
+    {
+        if (w == null || row == null) return;
+        try
+        {
+            if (!string.IsNullOrEmpty(row.Key)) _byKey[row.Key] = w;
+
+            bool wantsHint = row.HintFunc != null || !string.IsNullOrEmpty(row.Hint);
+            var zones = Native.UiPointerRouter.ZonesOf(w);
+            if (zones.Length == 0)
+            {
+                // ⚠️ 只给**只读行**补兜底热区（信息行/进度条）。可交互行绝不能补：
+                //    后登记优先 ⇒ 补上去的整行热区会盖住控件内部的 `<`/`>`、`+`/`-`、页签等子热区，
+                //    结果是“行能看到、点不动”。可交互控件的整行热区应该由控件工厂**先**登记（见 UiStepper/UiChoice）。
+                if (!row.ReadOnly)
+                {
+                    CoopLog.Debug("uikit.ui", () => $"row without zone (no tooltip): {row.Kind}/{row.Key}");
+                    return;
+                }
+                var fb = Native.UiPointerRouter.Add(new Native.UiHotZone
+                {
+                    Name = RowZoneName(row),
+                    Rect = w.Rect,
+                    Owner = w,
+                    Tint = false,
+                });
+                if (fb != null) zones = new[] { fb };
+            }
+
+            if (!wantsHint) return;
+            var func = row.HintFunc;
+            var text = row.Hint;
+            for (int i = 0; i < zones.Length; i++)
+            {
+                var z = zones[i];
+                if (z == null || !_hintBound.Add(z)) continue;      // 已绑过就不重复串联
+                Widgets.UiTooltip.Bind(z, () => (func != null ? func() : text) ?? "");
+            }
+        }
+        catch (Exception ex) { CoopLog.Warn("uikit.ui", () => "row index failed: " + ex.Message); }
+    }
+
+    private static string RowZoneName(UiRow row)
+        => "row:" + (row.Kind.ToString().ToLowerInvariant()) + ":" + (!string.IsNullOrEmpty(row.Key) ? row.Key : (row.Label ?? "-"));
 
     private static Widgets.UiWidget Add(Layout.UiFlow flow, Widgets.UiWidget w, Layout.UiSize size)
     {

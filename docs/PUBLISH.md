@@ -126,12 +126,14 @@ UIKit 的源码同时存在于主仓库（私有）`src\OpenNestUIKit*`（双仓
 ⚠️ **复制后必须重新脱敏**（公开树不得含本机路径与闭源模组名）：
 
 ```powershell
-git grep -n -I -E 'D:\\Dev|G:\\Steam|D:\\Steam|C:\\Users\\|Open Nest co-op' -- .
-git grep -n -I -E 'Synchrony|IronNestFCS|decompiled|IronNestCoop' -- .
+git grep -n -I -E 'D:\\Dev|G:\\Steam|D:\\Steam|C:\\Users\\' -- .
+git grep -n -I -E 'decompiled|ilspy|dnSpy|IronNestCoop' -- .
 ```
 
-命中就改写成通用描述（`<游戏目录>` / `<本仓库目录>` / “官方联机 UI”），例如源码注释里
-“抄 `Synchrony.MultiplayerMenu` 的做法” → “官方联机 UI 用的也是这一档”。
+（闭源模组名的完整清单在私有仓库的记忆文件里，公开仓**不重复列举**——名字本身也不要进公开树。）
+
+命中就改写成通用描述（`<游戏目录>` / `<本仓库目录>` / “官方联机 UI 的做法”）：
+比如源码注释里写了某个闭源模组的类型名，就改成“官方联机 UI 用的也是这一档”。
 
 ---
 

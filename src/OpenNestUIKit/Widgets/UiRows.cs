@@ -12,26 +12,76 @@ namespace OpenNestUIKit.Widgets;
 /// <summary>
 /// 子菜单入口行（`标签 + 说明 + ›`）：整行可点 → 由调用方 Push 到目标页面。
 /// 这是"多级菜单"在界面上的表现（表现与"跳到另一个菜单"一致，不需要重建窗口）。
+///
+/// 也用作**可折叠分组头**（<c>arrow</c> = ▾/▸）与**可选中列表条目**（<c>selected</c> = 选中高亮）。
 /// </summary>
 public sealed class UiNavRow : UiWidget
 {
     private Image _bg;
-    private UiText _label, _hint;
+    private UiText _label, _hint, _arrow;
+    private Image _arrowImg;                 // 贴图箭头（折叠分组用）
+    private bool _selected;
 
-    private UiNavRow(RectTransform rt, Image bg, UiText label, UiText hint) : base(rt)
+    private UiNavRow(RectTransform rt, Image bg, UiText label, UiText hint, UiText arrow, Image arrowImg) : base(rt)
     {
-        _bg = bg; _label = label; _hint = hint;
+        _bg = bg; _label = label; _hint = hint; _arrow = arrow; _arrowImg = arrowImg;
     }
 
-    /// <summary>创建子菜单入口行。<paramref name="zoneName"/> 可覆盖热区名（默认 <c>nav:标签</c>），自动化脚本用它做语言无关寻址。</summary>
-    public static UiNavRow Create(Transform parent, string label, string hint, Action onClick, float height = 0f, string zoneName = null)
+    /// <summary>当前是否选中态（可选中列表用）。</summary>
+    public bool Selected => _selected;
+
+    /// <summary>切换选中态（只改颜色，不重排）。</summary>
+    public void SetSelected(bool on)
+    {
+        _selected = on;
+        try
+        {
+            if (_bg != null) _bg.color = on ? Theme.UiTheme.RowSelected : Theme.UiTheme.RowBg;
+            if (_label != null) _label.Color = on ? Theme.UiTheme.Accent : Theme.UiTheme.TextPrimary;
+        }
+        catch { }
+    }
+
+    /// <summary>改箭头文字（仅文字箭头模式）。</summary>
+    public void SetArrow(string arrow)
+    {
+        try { if (_arrow != null) _arrow.Value = arrow ?? ""; } catch { }
+    }
+
+    /// <summary>
+    /// 切换折叠指示：<paramref name="expanded"/> = true 时箭头朝下（展开），false 时旋转 90° 朝右（收起）。
+    /// 贴图箭头模式用旋转，文字箭头模式退成 `-`/`+`（两者都是 **ASCII 安全**的）。
+    /// </summary>
+    public void SetArrowExpanded(bool expanded)
+    {
+        try
+        {
+            if (_arrowImg != null)
+            {
+                _arrowImg.rectTransform.localRotation = expanded ? Quaternion.identity : Quaternion.Euler(0f, 0f, 90f);
+                return;
+            }
+            SetArrow(expanded ? "-" : "+");
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// 创建子菜单入口行。<paramref name="zoneName"/> 可覆盖热区名（默认 <c>nav:标签</c>），自动化脚本用它做语言无关寻址。
+    ///
+    /// <paramref name="arrowText"/>：null = 默认 `›`；空串 = 不画箭头。
+    /// <paramref name="triangleArrow"/>：true = 用**程序化三角贴图**代替文字箭头（折叠分组用，
+    /// 因为游戏字体没有 `\u25be`/`\u25b8` 这两个字形的字形，实测渲染成 tofu 方框）。
+    /// </summary>
+    public static UiNavRow Create(Transform parent, string label, string hint, Action onClick, float height = 0f, string zoneName = null,
+        bool selected = false, string arrowText = null, bool triangleArrow = false)
     {
         var rt = NewRect("nav", parent);
         float h = height > 0f ? height : Theme.UiTheme.RowH + 6f;
         Theme.UiTheme.SetRect(rt, 0f, 0f, 300f, h);
 
         var bg = rt.gameObject.AddComponent<Image>();
-        bg.color = Theme.UiTheme.RowBg;
+        bg.color = selected ? Theme.UiTheme.RowSelected : Theme.UiTheme.RowBg;
 
         var txt = UiText.Create(rt, label, UiTextKind.Body, 0f, TextAlignmentOptions.Left);
         try
@@ -61,20 +111,47 @@ public sealed class UiNavRow : UiWidget
             catch { }
         }
 
-        var arrow = UiText.Create(rt, ">", UiTextKind.Title, 0f, TextAlignmentOptions.Center);
-        try
+        // arrowText：null = 默认 '›'（子菜单）；空串 = **不画箭头**（可选中列表那种）
+        UiText arrow = null;
+        Image arrowImg = null;
+        if (triangleArrow)
         {
-            arrow.Rect.anchorMin = new Vector2(1f, 0f);
-            arrow.Rect.anchorMax = new Vector2(1f, 1f);
-            arrow.Rect.pivot = new Vector2(1f, 0.5f);
-            arrow.Rect.offsetMin = new Vector2(-22f, 0f);
-            arrow.Rect.offsetMax = new Vector2(-6f, 0f);
-            arrow.Rect.sizeDelta = new Vector2(16f, 0f);
+            var tri = Native.NativeWidgets.TriangleSprite();
+            if (tri != null)
+            {
+                var go = NewRect("arrow", rt);
+                try
+                {
+                    go.anchorMin = go.anchorMax = new Vector2(1f, 0.5f);
+                    go.pivot = new Vector2(1f, 0.5f);
+                    go.sizeDelta = new Vector2(11f, 11f);
+                    go.anchoredPosition = new Vector2(-12f, 0f);
+                }
+                catch { }
+                arrowImg = go.gameObject.AddComponent<Image>();
+                arrowImg.sprite = tri;
+                arrowImg.type = Image.Type.Simple;
+                arrowImg.color = Theme.UiTheme.Accent;
+                arrowImg.raycastTarget = false;
+            }
         }
-        catch { }
-        arrow.Color = Theme.UiTheme.Accent;
+        if (arrowImg == null)
+        {
+            arrow = UiText.Create(rt, arrowText ?? ">", UiTextKind.Title, 0f, TextAlignmentOptions.Center);
+            try
+            {
+                arrow.Rect.anchorMin = new Vector2(1f, 0f);
+                arrow.Rect.anchorMax = new Vector2(1f, 1f);
+                arrow.Rect.pivot = new Vector2(1f, 0.5f);
+                arrow.Rect.offsetMin = new Vector2(-22f, 0f);
+                arrow.Rect.offsetMax = new Vector2(-6f, 0f);
+                arrow.Rect.sizeDelta = new Vector2(16f, 0f);
+            }
+            catch { }
+            arrow.Color = Theme.UiTheme.Accent;
+        }
 
-        var row = new UiNavRow(rt, bg, txt, hintTxt);
+        var row = new UiNavRow(rt, bg, txt, hintTxt, arrow, arrowImg);
         Native.UiPointerRouter.Add(new Native.UiHotZone
         {
             Name = !string.IsNullOrEmpty(zoneName) ? zoneName : "nav:" + label,
@@ -82,13 +159,14 @@ public sealed class UiNavRow : UiWidget
             Owner = row,
             Bg = bg,
             Tint = true,
-            BaseColor = Theme.UiTheme.RowBg,
+            BaseColor = selected ? Theme.UiTheme.RowSelected : Theme.UiTheme.RowBg,
             HoverColor = Theme.UiTheme.RowHover,
             PressColor = Theme.UiTheme.RowSelected,
             OnClick = () => { try { onClick?.Invoke(); } catch (Exception ex) { CoopLog.Warn("uikit.widget", () => "nav click failed: " + ex.Message); } },
         });
 
         Layout.UiMeasure.Register(rt, _ => h, _ => 300f);
+        row.SetSelected(selected);
         return row;
     }
 
@@ -181,7 +259,7 @@ public sealed class UiActionRow : UiWidget
         var rowBg = rt.gameObject.AddComponent<Image>();
         rowBg.color = Theme.UiTheme.RowBg;
         rowBg.raycastTarget = false;
-        Native.UiPointerRouter.Add(new Native.UiHotZone
+        var rowZone = Native.UiPointerRouter.Add(new Native.UiHotZone
         {
             Name = "row:" + StripTags(label),
             Rect = rt,
@@ -215,7 +293,9 @@ public sealed class UiActionRow : UiWidget
         catch { }
 
         Layout.UiMeasure.Register(rt, _ => h, _ => 300f);
-        return new UiActionRow(rt, l, btn);
+        var actRow = new UiActionRow(rt, l, btn);
+        rowZone.Owner = actRow;      // 归属登记：声明式渲染层靠它绑悬停提示（以前漏了 → 会被当成“没有热区”再补一个）
+        return actRow;
     }
 
     public override void Destroy()

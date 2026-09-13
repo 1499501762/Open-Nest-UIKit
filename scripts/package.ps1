@@ -11,7 +11,7 @@
 param(
     [string]$GameDirG = "C:\steam\steamapps\common\Iron Nest Heavy Turret Simulator",
     [string]$GameDirD = "C:\steam\steamapps\common\Iron Nest Heavy Turret Simulator",
-    [string]$Version = "0.0.1-Alpha-1"
+    [string]$Version = "0.0.1-Alpha-3"
 )
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"   # Compress-Archive 处理大文件时进度条会崩，禁用

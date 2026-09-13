@@ -34,6 +34,7 @@ public sealed class UiTextInput : UiWidget
     private string _value;
     private string _placeholder = "";
     private string _focusValue = "";        // 聚焦时的值（失焦时比对，只把“改过的”回传）
+    private int _maxLength;                 // > 0 = 超过就截断（第三方契约的 MaxLength）
 
     /// <summary>文本变化回调。</summary>
     public Action<string> OnChanged;
@@ -82,16 +83,24 @@ public sealed class UiTextInput : UiWidget
     /// <summary>标签文字。</summary>
     public string Label => _label != null ? _label.Value : "";
 
-    /// <summary>占位提示（空且未聚焦时显示）。</summary>
+    /// <summary>空且未聚焦时显示的灰色占位提示。</summary>
     public void SetPlaceholder(string s)
     {
         _placeholder = s ?? "";
         Refresh();
     }
 
+    /// <summary>最大字符数（&lt;= 0 = 不限制）。超出部分在写入时被截断。</summary>
+    public int MaxLength
+    {
+        get => _maxLength;
+        set { _maxLength = value > 0 ? value : 0; if (_maxLength > 0 && Value.Length > _maxLength) SetValueInternal(Value, notify: false); }
+    }
+
     /// <summary>创建输入框。<paramref name="zoneName"/> 可覆盖热区名（默认 <c>input:&lt;标签&gt;</c>）。</summary>
     public static UiTextInput Create(Transform parent, string label, string value, Action<string> onChanged,
-        Action<string> onSubmit = null, float height = 0f, string zoneName = null, bool password = false)
+        Action<string> onSubmit = null, float height = 0f, string zoneName = null, bool password = false,
+        string placeholder = null, int maxLength = 0)
     {
         var rt = NewRect("input", parent);
         float h = height > 0f ? height : Theme.UiTheme.RowH;
@@ -143,10 +152,14 @@ public sealed class UiTextInput : UiWidget
         var input = new UiTextInput(rt, txt, vtxt, bg)
         {
             _value = value ?? "",
+            _placeholder = placeholder ?? "",
+            _maxLength = maxLength > 0 ? maxLength : 0,
             OnChanged = onChanged,
             OnSubmit = onSubmit,
             IsPassword = password,
         };
+        if (input._maxLength > 0 && input._value.Length > input._maxLength)
+            input._value = input._value.Substring(0, input._maxLength);
         try { _all.Add(input); } catch { }
         input.Refresh();
 
@@ -207,8 +220,9 @@ public sealed class UiTextInput : UiWidget
     /// <summary>写值（输入管线与外部都走这里）。<paramref name="notify"/> = 是否触发 OnChanged。</summary>
     internal void SetValueInternal(string v, bool notify)
     {
-        _value = v ?? "";
-        ResetCaret();                       // 打字/改值 → 光标复位成常亮（停手后才开始闪）
+        _value = v ?? "";        // 最大长度（第三方契约的 MaxLength）：这里是最窄的咽喉 —— 物理键/CJK/IME 提交/退格/外部赋值
+        // 全走这个入口，所以只在这拦一次就够了。
+        if (_maxLength > 0 && _value.Length > _maxLength) _value = _value.Substring(0, _maxLength);        ResetCaret();                       // 打字/改值 → 光标复位成常亮（停手后才开始闪）
         Refresh();
         if (notify)
         {

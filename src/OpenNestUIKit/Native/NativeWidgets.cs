@@ -483,6 +483,47 @@ public static class NativeWidgets
 
     private static UnityEngine.Sprite _circleSprite;
 
+    /// <summary>
+    /// 程序化三角箭头（32×32、带 1px 抗锯齿，**默认朝下**）—— 给折叠分组的展开指示用。
+    ///
+    /// 为什么不用文字箭头（2026-09-13 实机截图取证）：`\u25be`(U+25BE)/`\u25b8`(U+25B8) 在游戏字体里**没有字形**，
+    /// 屏上渲染成一个描边方框（tofu）—— 和“拖拽条手柄是方的”同一类问题：**字体/素材给不了的形状就自己画**。
+    /// 用法：`Image` + 旋转（0° = 展开、90° = 收起），不依赖字体也不依赖图集。
+    /// </summary>
+    public static UnityEngine.Sprite TriangleSprite()
+    {
+        if (_triangleSprite != null) return _triangleSprite;
+        try
+        {
+            const int N = 32;
+            var tex = new Texture2D(N, N, TextureFormat.RGBA32, false);
+            tex.wrapMode = TextureWrapMode.Clamp;
+            tex.filterMode = FilterMode.Bilinear;
+            var px = new Color32[N * N];
+            float wMax = N - 4f;                      // 两侧各留 2px
+            float cx = N * 0.5f;
+            for (int y = 0; y < N; y++)
+            {
+                float t = (float)y / (N - 1);         // 0 = 贴图底（顶点）、1 = 贴图顶（底边）
+                float half = 0.5f * wMax * t;
+                for (int x = 0; x < N; x++)
+                {
+                    float dx = Mathf.Abs(x + 0.5f - cx);
+                    float a = Mathf.Clamp01(half - dx + 0.5f);   // 边缘 1px 渐变 = 抗锯齿
+                    px[y * N + x] = new Color32(255, 255, 255, (byte)Mathf.RoundToInt(a * 255f));
+                }
+            }
+            tex.SetPixels32(px);
+            tex.Apply(false, false);
+            _triangleSprite = UnityEngine.Sprite.Create(tex, new Rect(0, 0, N, N), new Vector2(0.5f, 0.5f), 100f, 0, SpriteMeshType.FullRect);
+            _triangleSprite.name = "nw_triangle";
+        }
+        catch (Exception ex) { CoopLog.Warn("uikit.native", () => "TriangleSprite: " + ex.Message); }
+        return _triangleSprite;
+    }
+
+    private static UnityEngine.Sprite _triangleSprite;
+
     /// <summary>手柄圆块：优先用程序化圆片（圆）；万一贴图建不出来就退回原生 `SGRounded`（至少有个块）。</summary>
     private static Image AddCircleKnob(GameObject go)
     {

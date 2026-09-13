@@ -38,6 +38,9 @@ public static class UiMenuWindow
     private static bool _f6Down, _escDown;
     private static string _lastLang = "";
     private static string _statusText = "";
+    private static string _lastPage = "";                      // 上一次广播给契约的页面 id（PageChanged）
+    private static Widgets.UiModal _modal;                      // 当前打开的确认框（同时只允许一个）
+    private static Action _modalCancel;                          // ESC = 取消（弹框期间不执行返回）
 
     /// <summary>菜单是否打开。</summary>
     public static bool IsOpen { get; private set; }
@@ -104,6 +107,8 @@ public static class UiMenuWindow
         if (!IsOpen) return;
         IsOpen = false;
 
+        // 弹着确认框时关菜单：先当成“取消”（否则回调永不触发，第三方的流程会挂住）
+        try { if (_modalCancel != null) { var c = _modalCancel; _modalCancel = null; c(); } } catch { }
         // 关闭顺序与打开相反：指针路由 → ESC → 射线/层级
         try { Native.UiPointerRouter.Deactivate(); } catch { }
         try { Widgets.UiTextInput.BlurAllInputs(); } catch { }
@@ -296,6 +301,80 @@ public static class UiMenuWindow
 
     // ---------------- 每帧 ----------------
 
+    /// <summary>把当前页面的某一行（按 <c>UiRow.Key</c>）滚到可见位置（第三方契约 <c>UiKitHost.ScrollToKey</c> 走这里）。</summary>
+    public static bool ScrollToKey(string key)
+    {
+        try
+        {
+            if (!IsOpen || string.IsNullOrEmpty(key)) return false;
+            var page = UiPageCatalog.Get(CurrentPage);
+            return page != null && page.ScrollToKey(key);
+        }
+        catch { return false; }
+    }
+
+    /// <summary>当前页面滚回顶部。</summary>
+    public static void ScrollTop()
+    {
+        try
+        {
+            if (!IsOpen) return;
+            UiPageCatalog.Get(CurrentPage)?.ScrollTop();
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// 弹一个模态确认框（第三方契约 <c>UiKitHost.Confirm</c> 走这里）。
+    ///
+    /// 约定：**只在菜单打开时显示**（需要画布与输入隔离）；菜单关着 → 记一条 warn 并回调 <c>false</c>，
+    /// 让调用方的流程能正常结束（不会“点了没反应”）。
+    /// ESC = 取消（弹框期间不会顺手把菜单也关掉）。
+    /// </summary>
+    public static void ShowConfirm(string payload, Action<bool> onResult)
+    {
+        try
+        {
+            if (!IsOpen)
+            {
+                CoopLog.Warn("uikit.ui", () => "Confirm 忽略：菜单未打开（确认框需要画布与输入隔离）");
+                try { onResult?.Invoke(false); } catch { }
+                return;
+            }
+            EnsureBuilt();
+            if (_modal != null) { try { _modalCancel?.Invoke(); } catch { } }
+
+            string title = payload ?? "", body = "";
+            int nl = title.IndexOf('\n');
+            if (nl >= 0) { body = title.Substring(nl + 1); title = title.Substring(0, nl); }
+
+            var parent = _window != null && _window.Content != null ? _window.Content : (Transform)CanvasRoot;
+            const string Owner = "uikit.modal";
+            bool done = false;
+
+            Action<bool> deliver = ok =>
+            {
+                if (done) return;
+                done = true;
+                try { Native.UiEscapeLevels.Pop(Owner); } catch { }
+                _modal = null;
+                _modalCancel = null;
+                try { onResult?.Invoke(ok); } catch (Exception ex) { CoopLog.Warn("uikit.ui", () => "confirm callback failed: " + ex.Message); }
+            };
+
+            Native.UiEscapeLevels.Push(Owner);
+            _modal = Widgets.UiModal.Show(parent, title, body,
+                UiKitLoc.T("确定", "OK"), UiKitLoc.T("取消", "Cancel"), deliver);
+            _modalCancel = () => { var m = _modal; _modal = null; try { m?.Close(); } catch { } deliver(false); };
+            CoopLog.Info("uikit.ui", () => $"确认框已打开 '{title}'");
+        }
+        catch (Exception ex)
+        {
+            CoopLog.Warn("uikit.ui", () => "confirm failed: " + ex.Message);
+            try { onResult?.Invoke(false); } catch { }
+        }
+    }
+
     /// <summary>每帧驱动。</summary>
     public static void Tick(float dt)
     {
@@ -314,15 +393,23 @@ public static class UiMenuWindow
             }
             _f6Down = f6;
 
-            // ESC：返回上一级（栈底时关闭）
+            // ESC：返回上一级（栈底时关闭）；弹着确认框时先取消确认框
             if (IsOpen)
             {
                 bool esc = false;
                 try { esc = kb != null && kb.escapeKey.isPressed; } catch { }
                 if (esc && !_escDown && !Native.UiPointerRouter.TextFocus && !Widgets.UiTextRouter.ConsumedEsc)
                 {
-                    CoopLog.Debug("uikit.ui", () => $"ESC → {(_stack.CanGoBack ? "返回上级" : "关闭菜单")}");
-                    Back();
+                    if (_modalCancel != null)
+                    {
+                        CoopLog.Debug("uikit.ui", () => "ESC → 取消确认框");
+                        try { _modalCancel(); } catch { }
+                    }
+                    else
+                    {
+                        CoopLog.Debug("uikit.ui", () => $"ESC → {(_stack.CanGoBack ? "返回上级" : "关闭菜单")}");
+                        Back();
+                    }
                 }
                 _escDown = esc;
             }
@@ -340,12 +427,22 @@ public static class UiMenuWindow
                 Native.UiEscapeGuard.Apply();
             }
 
-            // 语言变化 → 刷新文案（含面包屑/状态）
+            // 语言变化 → 刷新文案（含面包屑/状态）+ 推给第三方契约
             if (UiKitLoc.Current != _lastLang)
             {
                 _lastLang = UiKitLoc.Current;
+                try { API.UiKitLang.SetChinese(UiKitLoc.IsChinese); } catch { }
                 try { UiPageCatalog.NotifyLanguageChanged(); } catch { }
                 try { RefreshHeader(); } catch { }
+            }
+
+            // 当前页面变化 → 广播给第三方（打开/导航/返回/关闭都会走到）
+            string nowPage = IsOpen ? (CurrentPage ?? "") : "";
+            if (!string.Equals(nowPage, _lastPage, StringComparison.Ordinal))
+            {
+                string oldPage = _lastPage;
+                _lastPage = nowPage;
+                try { API.UiKitHost.RaisePageChanged(oldPage, nowPage); } catch { }
             }
 
             if (_statusText.Length > 0 && _clock >= _statusUntil)

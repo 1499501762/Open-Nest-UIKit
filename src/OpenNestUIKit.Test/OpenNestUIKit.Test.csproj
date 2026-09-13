@@ -7,7 +7,7 @@
     <AssemblyName>OpenNestUIKit.Test</AssemblyName>
     <RootNamespace>OpenNestUIKit.Test</RootNamespace>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <Version>0.0.1-Alpha-2</Version>
+    <Version>0.0.1-Alpha-3</Version>
     <!--
       OpenNestUIKit.Test —— **测试模组**（BepInEx 版）。
       用途：从"外部调用方"的角度验证 OpenNestUIKit 的全部能力：

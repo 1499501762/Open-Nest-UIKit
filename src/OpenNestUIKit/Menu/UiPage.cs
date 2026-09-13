@@ -59,6 +59,12 @@ public abstract class UiPage
     /// <summary>语言变化 → 刷新文案（默认重建：清掉旧根再 <see cref="Build"/>）。</summary>
     public virtual void OnLanguageChanged() { }
 
+    /// <summary>把某一项（按第三方声明的 <c>UiRow.Key</c>）滚到可见位置；不支持则返回 false。</summary>
+    public virtual bool ScrollToKey(string key) => false;
+
+    /// <summary>滚回顶部（不支持则什么都不做）。</summary>
+    public virtual void ScrollTop() { }
+
     /// <summary>显隐（切页用）。</summary>
     public void SetVisible(bool on)
     {

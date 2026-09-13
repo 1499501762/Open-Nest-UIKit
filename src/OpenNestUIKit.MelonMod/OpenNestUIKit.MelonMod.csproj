@@ -7,7 +7,7 @@
     <AssemblyName>OpenNestUIKit.MelonMod</AssemblyName>
     <RootNamespace>OpenNestUIKit</RootNamespace>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <Version>0.0.1-Alpha-2</Version>
+    <Version>0.0.1-Alpha-3</Version>
     <!--
       OpenNestUIKit —— 原生 UI 库模组（MelonLoader 版）。
       与 BepInEx 版共用同一份源码（src\OpenNestUIKit\**），只换入口壳：
