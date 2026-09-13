@@ -1,5 +1,71 @@
 # Open Nest UIKit — Release Notes
 
+## `0.0.1-Alpha-4` — flat industrial look, key/value rows, two-pane pages and working CJK input
+
+Verified **in-game** on the BepInEx 6 end (scripted runs + screenshots + numeric probes). This release is
+mostly about how a page *looks* and how text gets *into* it.
+
+### Flat industrial theme
+
+The theme moved away from cards and rounded fills to solid fills plus **procedural 1px lines** (no new
+textures): `ModStyle.Outline` for window/frame borders, and `TopRule` / `BottomRule` / `LeftRule` for
+separators that consume **zero layout height**. Rows now share the content background (no per-row card),
+selection is an amber tint plus the left accent bar, tabs are flat (amber text + bold + 2px underline, no
+fill), section titles are a 2px amber bar with letter-spaced text, and buttons carry a style-coloured 1px
+outline (`primary` = amber, `danger` = red, `secondary` = border grey).
+
+### New rows and layout
+
+| Item | What it gives you |
+|---|---|
+| `Info(label, value)` | a read-only **key/value row** (76px label column, value left-aligned, single line) — for detail pages that are mostly "name: value" |
+| `SelectableList(..., hints, ...)` | the scrolling single-selection list with per-row hover hints |
+| `List` / `SelectableList` with `height < 0` | **grow to fill** — one of the two pieces a two-pane page needs |
+| two-pane declarative pages | a fixed-width left column plus a growing right column, each scrolling independently |
+
+Also fixed: a list declared inside a `Grow` host no longer produces a **second (outer) scrollbar** — when the
+host itself is height-auto the content fills the viewport (`UiList.fillHost`), instead of deriving content
+height from children whose own height depends on the viewport.
+
+### CJK / IME input
+
+Four separate defects, all fixed (all observable in `widgetprobe` / `chatprobe`):
+
+1. **Partial pinyin used to leak in.** The OS "result" string is not always converted text, so a native
+   commit is only accepted when it contains CJK (otherwise the composition channel owns it).
+2. **The IME could not be switched to Chinese at all.** Unity only sets `Input.imeCompositionMode = On`
+   when a real input field takes focus; a canvas-drawn box with no focused `InputField` left it `Off`, so
+   the OS never associated an IME context. The router now sets the mode explicitly (through reflection —
+   the interop assembly does not expose the enum) and, as a fallback, creates/associates an IME context for
+   the window after focus (delayed ~0.4s so it does not race the engine).
+3. **Ghost text after submit.** `GCS_RESULTSTR` is a *held value*, not an event: clearing the "last native
+   string" on focus made the next focus replay the previous word. It is now kept for the whole session, and
+   a fresh-commit flag distinguishes "same value, new commit" from "same value, still held".
+4. **The first candidate of a session was inserted twice** when the native and composition channels both
+   delivered the same commit a few frames apart. Appends are now deduplicated by *content* (the box tail
+   already ends with the text and no newer typing activity happened since), so a genuinely repeated word
+   still types twice.
+
+The chat overlay also stopped re-focusing and re-filling itself right after sending (a short cooldown after
+`UiTextRouter.Submit` plus clearing the draft when the box is re-expanded).
+
+### Debug mode and the test mod
+
+- Host/footer debug text is **debug-only** now (`OpenNestModMenu.cfg` → `Debug`, `LogLevel == Debug`, or the
+  test harness).
+- **`mockcfg`** writes a mock config file (`BepInEx\config\open.nest.uikit.test.cfg`) covering every
+  auto-generated control: bool, int+range, float+step, enum (including Chinese values), keybind, text, empty
+  text, read-only, section headings and no-type-inference keys — the fastest way to check that the settings
+  renderer still handles everything.
+- New offline test commands: `imedecide:<native>|<cached>|<cur>` (replays the input-decision rule) and
+  `imefake:<text>` / `imecomp:<text>` (inject a native commit or a composition string).
+
+### Build status
+
+Five projects (mod × 2 loaders, contract, test × 2 shells) compile with **0 errors / 0 warnings**; the
+scripted in-game runs pass, and Chinese input was verified end-to-end (native submit logged, no ghost text,
+no duplicate candidate, no auto re-focus after send).
+
 ## `0.0.1-Alpha-3` — a bigger third-party widget set, dialogs, scrolling and localisation
 
 Everything below was verified **in-game** (scripted clicks + screenshots, BepInEx 6 end): the new

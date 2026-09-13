@@ -20,11 +20,16 @@ public sealed class UiNavRow : UiWidget
     private Image _bg;
     private UiText _label, _hint, _arrow;
     private Image _arrowImg;                 // 贴图箭头（折叠分组用）
+    private Image _selBar;                   // 选中态左侧强调条（3px）
     private bool _selected;
 
-    private UiNavRow(RectTransform rt, Image bg, UiText label, UiText hint, UiText arrow, Image arrowImg) : base(rt)
+    /// <summary>右侧副文本区宽（版本/状态这类信息右对齐成一列）。
+    /// ⚠ 不能太宽：它会从主文本那里“抢走”宽度（模组列表左栏只有 440，过宽会让名称被省略号吃掉）。</summary>
+    private const float HintW = 110f;
+
+    private UiNavRow(RectTransform rt, Image bg, UiText label, UiText hint, UiText arrow, Image arrowImg, Image selBar) : base(rt)
     {
-        _bg = bg; _label = label; _hint = hint; _arrow = arrow; _arrowImg = arrowImg;
+        _bg = bg; _label = label; _hint = hint; _arrow = arrow; _arrowImg = arrowImg; _selBar = selBar;
     }
 
     /// <summary>当前是否选中态（可选中列表用）。</summary>
@@ -37,9 +42,17 @@ public sealed class UiNavRow : UiWidget
         try
         {
             if (_bg != null) _bg.color = on ? Theme.UiTheme.RowSelected : Theme.UiTheme.RowBg;
-            if (_label != null) _label.Color = on ? Theme.UiTheme.Accent : Theme.UiTheme.TextPrimary;
+            if (_label != null) _label.Color = on ? Theme.UiTheme.RowSelectedText : Theme.UiTheme.TextPrimary;
+            if (_selBar != null) _selBar.enabled = on;      // 左侧强调条只在选中时显示
         }
         catch { }
+    }
+
+    /// <summary>主/副文本都改成**单行省略**（信息型列表用：超长名称不换行、不越界）。</summary>
+    public void SetSingleLine(bool on)
+    {
+        try { if (_label != null) _label.SetSingleLine(on); } catch { }
+        try { if (_hint != null) _hint.SetSingleLine(on); } catch { }
     }
 
     /// <summary>改箭头文字（仅文字箭头模式）。</summary>
@@ -83,6 +96,26 @@ public sealed class UiNavRow : UiWidget
         var bg = rt.gameObject.AddComponent<Image>();
         bg.color = selected ? Theme.UiTheme.RowSelected : Theme.UiTheme.RowBg;
 
+        // 选中态左侧强调条（3px，贴在行左缘；只在选中时可见）——
+        // 比“只换底色”更能一眼看出选中的是哪一行（工业拟真风用 Accent 金色）。
+        var selBar = NewRect("selbar", rt);
+        var selBarImg = selBar.gameObject.AddComponent<Image>();
+        selBarImg.color = Theme.UiTheme.Accent;
+        selBarImg.raycastTarget = false;
+        selBarImg.enabled = selected;
+        try
+        {
+            selBar.anchorMin = new Vector2(0f, 0f);
+            selBar.anchorMax = new Vector2(0f, 1f);
+            selBar.pivot = new Vector2(0f, 0.5f);
+            selBar.sizeDelta = new Vector2(3f, 0f);
+            selBar.anchoredPosition = Vector2.zero;
+        }
+        catch { }
+
+        // 扁平工业风：行底**发丝线**（贴下沿 1px，不占布局高度）→ 整列看起来是“钢面板 + 网格线”。
+        Theme.ModStyle.BottomRule(rt, Theme.UiTheme.Hairline, Theme.UiTheme.OutlineW);
+
         var txt = UiText.Create(rt, label, UiTextKind.Body, 0f, TextAlignmentOptions.Left);
         try
         {
@@ -90,7 +123,8 @@ public sealed class UiNavRow : UiWidget
             txt.Rect.anchorMax = new Vector2(1f, 1f);
             txt.Rect.pivot = new Vector2(0f, 0.5f);
             txt.Rect.offsetMin = new Vector2(10f, 0f);
-            txt.Rect.offsetMax = new Vector2(-24f, 0f);
+            // ⚠ 有副文本（右侧版本/状态）时主文本必须**让出固定区**，否则长名称会盖住它
+            txt.Rect.offsetMax = new Vector2(string.IsNullOrEmpty(hint) ? -24f : -(HintW + 32f), 0f);
         }
         catch { }
         txt.Color = Theme.UiTheme.TextPrimary;
@@ -104,16 +138,16 @@ public sealed class UiNavRow : UiWidget
                 hintTxt.Rect.anchorMin = new Vector2(1f, 0f);
                 hintTxt.Rect.anchorMax = new Vector2(1f, 1f);
                 hintTxt.Rect.pivot = new Vector2(1f, 0.5f);
-                hintTxt.Rect.offsetMin = new Vector2(-220f, 0f);
+                hintTxt.Rect.offsetMin = new Vector2(-(HintW + 24f), 0f);
                 hintTxt.Rect.offsetMax = new Vector2(-24f, 0f);
-                hintTxt.Rect.sizeDelta = new Vector2(196f, 0f);
+                hintTxt.Rect.sizeDelta = new Vector2(HintW, 0f);
             }
             catch { }
+            try { hintTxt.SetSingleLine(true); } catch { }   // 副文本也单行省略
         }
 
         // arrowText：null = 默认 '›'（子菜单）；空串 = **不画箭头**（可选中列表那种）
-        UiText arrow = null;
-        Image arrowImg = null;
+        UiText arrow = null;        Image arrowImg = null;
         if (triangleArrow)
         {
             var tri = Native.NativeWidgets.TriangleSprite();
@@ -151,7 +185,7 @@ public sealed class UiNavRow : UiWidget
             arrow.Color = Theme.UiTheme.Accent;
         }
 
-        var row = new UiNavRow(rt, bg, txt, hintTxt, arrow, arrowImg);
+        var row = new UiNavRow(rt, bg, txt, hintTxt, arrow, arrowImg, selBarImg);
         Native.UiPointerRouter.Add(new Native.UiHotZone
         {
             Name = !string.IsNullOrEmpty(zoneName) ? zoneName : "nav:" + label,
@@ -222,6 +256,63 @@ public sealed class UiInfoRow : UiWidget
 
         Layout.UiMeasure.Register(rt, _ => h, _ => 300f);
         return new UiInfoRow(rt, l, v);
+    }
+
+    /// <summary>改值。</summary>
+    public void SetValue(string s) { if (_value != null) _value.Value = s; }
+
+    public override void Destroy()
+    {
+        try { Layout.UiMeasure.Unregister(_rt); } catch { }
+        base.Destroy();
+    }
+}
+
+/// <summary>
+/// 键值行（`标签 | 值`，详情页专用）：**标签列固定宽 + 值列左对齐**。
+///
+/// 扁平工业风的版式要点：多行键值下来，标签与值**各自成一列**（靠列对齐读出结构），
+/// 而不是把“标签：值”挤成一行散文（长路径/长文案会把标签挤走，也扫不出列）。
+/// </summary>
+public sealed class UiKvRow : UiWidget
+{
+    private UiText _label, _value;
+
+    private UiKvRow(RectTransform rt, UiText label, UiText value) : base(rt) { _label = label; _value = value; }
+
+    /// <summary>创建键值行（<paramref name="height"/> = 0 → 用 <see cref="Theme.UiTheme.RowH"/>）。</summary>
+    public static UiKvRow Create(Transform parent, string label, string value, float height = 0f)
+    {
+        var rt = NewRect("kv", parent);
+        float h = height > 0f ? height : Theme.UiTheme.RowH;
+        Theme.UiTheme.SetRect(rt, 0f, 0f, 300f, h);
+
+        float lw = Theme.UiTheme.KvLabelW;
+        var l = UiText.Create(rt, label, UiTextKind.Note, 0f, TextAlignmentOptions.Left);
+        try
+        {
+            l.Rect.anchorMin = new Vector2(0f, 0f);
+            l.Rect.anchorMax = new Vector2(0f, 1f);
+            l.Rect.pivot = new Vector2(0f, 0.5f);
+            l.Rect.offsetMin = new Vector2(0f, 0f);
+            l.Rect.offsetMax = new Vector2(lw, 0f);
+        }
+        catch { }
+
+        var v = UiText.Create(rt, value, UiTextKind.Value, 0f, TextAlignmentOptions.Left);
+        try
+        {
+            v.Rect.anchorMin = new Vector2(0f, 0f);
+            v.Rect.anchorMax = new Vector2(1f, 1f);
+            v.Rect.pivot = new Vector2(0f, 0.5f);
+            v.Rect.offsetMin = new Vector2(lw + 8f, 0f);
+            v.Rect.offsetMax = new Vector2(0f, 0f);
+        }
+        catch { }
+        try { v.SetSingleLine(true); } catch { }       // 长路径/长文本单行省略（行高固定，折行会溢出）
+
+        Layout.UiMeasure.Register(rt, _ => h, _ => 300f);
+        return new UiKvRow(rt, l, v);
     }
 
     /// <summary>改值。</summary>

@@ -99,6 +99,13 @@ public sealed class UiPageDef : IUiPageDef
     public UiPageDef Label(string text)
         => Add(new UiRow { Kind = UiRowKind.Label, Label = text ?? "", ReadOnly = true });
 
+    /// <summary>
+    /// 键值行（`标签 | 值`，只读）：宿主把标签列固定宽、值列左对齐 → 多行下来两列对齐。
+    /// 详情/诊断页的属性表就用它（比 `Label("状态：…")` 那种一行到底好扫读）。
+    /// </summary>
+    public UiPageDef Info(string label, string value)
+        => Add(new UiRow { Kind = UiRowKind.Info, Label = label ?? "", Value = value ?? "", ReadOnly = true });
+
     /// <summary>分隔线。</summary>
     public UiPageDef Separator()
         => Add(new UiRow { Kind = UiRowKind.Separator, ReadOnly = true });
@@ -275,7 +282,8 @@ public sealed class UiPageDef : IUiPageDef
         {
             Kind = UiRowKind.List,
             Key = key,
-            ListHeight = height > 40f ? height : 240f,
+            // ⚠ 保留原值（含**负值**）：负 = 吃掉剩余高度（两栏页的栏内列表），0/小值 = 老规矩用 240 默认高。
+            ListHeight = height,
             ListRows = l.Rows,
             ReadOnly = true,
         });
@@ -285,6 +293,23 @@ public sealed class UiPageDef : IUiPageDef
     /// **可选中的列表**（固定高 + 自带滚动条，条目带选中高亮）：选一个才能做下一步时用它。
     /// 回调给你选中索引；宿主不做任何记忆，重建页面时你自己把 <paramref name="selected"/> 传回来。
     /// </summary>
+    /// <summary>
+    /// **可选中的列表（带右对齐副文本）**：<paramref name="hints"/> 与 <paramref name="items"/> 一一对应。
+    /// 信息型列表（模组列表/房间列表）用它：左边主文本超长**省略**、右边版本/状态**对齐成一列**。
+    /// </summary>
+    public UiPageDef SelectableList(string key, float height, IReadOnlyList<string> items, IReadOnlyList<string> hints,
+        int selected, Action<int> onSelected)
+    {
+        SelectableList(key, height, items, selected, onSelected);
+        if (_last != null)
+        {
+            var hs = new List<string>();
+            if (hints != null) for (int i = 0; i < hints.Count; i++) hs.Add(hints[i] ?? "");
+            _last.ListHints = hs;
+        }
+        return this;
+    }
+
     public UiPageDef SelectableList(string key, float height, IReadOnlyList<string> items, int selected, Action<int> onSelected)
     {
         var arr = new List<string>();
@@ -293,7 +318,8 @@ public sealed class UiPageDef : IUiPageDef
         {
             Kind = UiRowKind.SelectableList,
             Key = key,
-            ListHeight = height > 40f ? height : 240f,
+            // ⚠ 同样保留原值（负 = 吃掉剩余高度）
+            ListHeight = height,
             Choices = arr,
             Value = Math.Max(0, Math.Min(arr.Count, selected)).ToString(),
             Write = v =>

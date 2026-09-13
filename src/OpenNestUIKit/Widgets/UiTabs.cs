@@ -10,11 +10,17 @@ using TMPro;
 
 namespace OpenNestUIKit.Widgets;
 
-/// <summary>页签栏（选中态高亮 + 底部指示条）。</summary>
+/// <summary>
+/// 页签栏（扁平工业风：**不用填充底**，选中靠“琥珀文字 + 2px 琥珀下划线”标记）。
+///
+/// 为什么这样改（用户：“还能更好看吗”）：旧版选中格填暗金 + 2px 下划线，等于**双重强调**，
+/// 在深色钢底上看着脏。现在：底色一律同内容底（只留悬停微亮），选中只靠线条与颜色。
+/// </summary>
 public sealed class UiTabs : UiWidget
 {
     private readonly List<Image> _bg = new();
     private readonly List<Image> _under = new();
+    private readonly List<UiText> _txt = new();
     private string[] _tabs;
     private int _index;
 
@@ -30,8 +36,9 @@ public sealed class UiTabs : UiWidget
         set { _index = Mathf.Clamp(value, 0, Mathf.Max(0, (_tabs?.Length ?? 1) - 1)); Refresh(); }
     }
 
-    /// <summary>创建页签栏。</summary>
-    public static UiTabs Create(Transform parent, string[] tabs, int index, Action<int> onChanged)
+    /// <summary>创建页签栏。<paramref name="zonePrefix"/> 非空时热区名为 <c>tab:&lt;前缀&gt;:&lt;i&gt;</c>
+    /// （一页里可能有多条页签栏 —— 不带前缀彼此重名，自动化就只能碰运气命中）。</summary>
+    public static UiTabs Create(Transform parent, string[] tabs, int index, Action<int> onChanged, string zonePrefix = null)
     {
         var rt = NewRect("tabs", parent);
         float h = Theme.UiTheme.TabH;
@@ -97,19 +104,23 @@ public sealed class UiTabs : UiWidget
 
             t._bg.Add(bg);
             t._under.Add(underImg);
+            t._txt.Add(txt);
             Native.UiPointerRouter.Add(new Native.UiHotZone
             {
-                Name = "tab" + i,
+                Name = string.IsNullOrEmpty(zonePrefix) ? ("tab" + i) : ("tab:" + zonePrefix + ":" + i),
                 Rect = tabRt,
                 Owner = t,
                 Bg = bg,
                 Tint = true,
-                BaseColor = Theme.UiTheme.HeaderBg,
+                BaseColor = Theme.UiTheme.ContentBg,
                 HoverColor = Theme.UiTheme.RowHover,
                 PressColor = Theme.UiTheme.RowSelected,
                 OnClick = () => t.Select(idx),
             });
         }
+
+        // 整条页签栏下沿 1px 发丝线（工业风：结构与结构之间必有线）
+        Theme.ModStyle.BottomRule(rt, Theme.UiTheme.Hairline, Theme.UiTheme.OutlineW);
 
         t.Index = index;
         return t;
@@ -134,8 +145,14 @@ public sealed class UiTabs : UiWidget
             for (int i = 0; i < _bg.Count; i++)
             {
                 bool on = i == _index;
-                if (_bg[i] != null) _bg[i].color = on ? Theme.UiTheme.RowSelected : Theme.UiTheme.HeaderBg;
+                // 底色不区分选中（只留内容底）；选中 = 琥珀文字 + 下划线
+                if (_bg[i] != null) _bg[i].color = Theme.UiTheme.ContentBg;
                 if (_under[i] != null) _under[i].enabled = on;
+                if (i < _txt.Count && _txt[i] != null)
+                {
+                    _txt[i].Color = on ? Theme.UiTheme.Accent : Theme.UiTheme.TextSecondary;
+                    _txt[i].Text.fontStyle = on ? FontStyles.Bold : FontStyles.Normal;
+                }
             }
         }
         catch { }

@@ -58,8 +58,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\package.ps1 `
 
 | 文件 | 内容 |
 |---|---|
-| `OpenNestUIKit-0.0.1-Alpha-1-BepInEx.zip` | `BepInEx/plugins/OpenNestUIKit.dll` + `OpenNestUIKit.API.dll` + `README.txt` |
-| `OpenNestUIKit-0.0.1-Alpha-1-MelonLoader.zip` | `Mods/OpenNestUIKit.MelonMod.dll` + `UserLibs/OpenNestUIKit.API.dll` + `README.txt` |
+| `OpenNestUIKit-0.0.1-Alpha-4-BepInEx.zip` | `BepInEx/plugins/OpenNestUIKit.dll` + `OpenNestUIKit.API.dll` + `README.txt` |
+| `OpenNestUIKit-0.0.1-Alpha-4-MelonLoader.zip` | `Mods/OpenNestUIKit.MelonMod.dll` + `UserLibs/OpenNestUIKit.API.dll` + `README.txt` |
 
 > 打包前**关掉游戏**，否则插件 dll 被占用、构建部署会失败。
 
@@ -70,17 +70,17 @@ powershell -ExecutionPolicy Bypass -File .\scripts\package.ps1 `
 **首选 `gh`（本机已装，见下）**——它按 UTF-8 处理正文，不会有编码坑：
 
 ```powershell
-gh release create v0.0.1-Alpha-2 --prerelease --title "0.0.1-Alpha-2" `
+gh release create v0.0.1-Alpha-4 --prerelease --title "0.0.1-Alpha-4" `
   --notes-file docs\RELEASE_NOTES.md `
-  release\OpenNestUIKit-0.0.1-Alpha-2-BepInEx.zip `
-  release\OpenNestUIKit-0.0.1-Alpha-2-MelonLoader.zip
+  release\OpenNestUIKit-0.0.1-Alpha-4-BepInEx.zip `
+  release\OpenNestUIKit-0.0.1-Alpha-4-MelonLoader.zip
 ```
 
 改正文 / 换资产：
 
 ```powershell
-gh release edit v0.0.1-Alpha-2 --notes-file docs\RELEASE_NOTES.md      # 正文（UTF-8）
-gh release upload v0.0.1-Alpha-2 --clobber release\*.zip               # 覆盖同名资产
+gh release edit v0.0.1-Alpha-4 --notes-file docs\RELEASE_NOTES.md      # 正文（UTF-8）
+gh release upload v0.0.1-Alpha-4 --clobber release\*.zip               # 覆盖同名资产
 ```
 
 > 本机 gh：`C:\Program Files\GitHub CLI\gh.exe`（2.100.0，已登录 `1499501762`，scopes `gist, read:org, repo, workflow`）。
@@ -127,7 +127,8 @@ UIKit 的源码同时存在于主仓库（私有）`src\OpenNestUIKit*`（双仓
 
 ```powershell
 git grep -n -I -E 'D:\\Dev|G:\\Steam|D:\\Steam|C:\\Users\\' -- .
-git grep -n -I -E 'decompiled|ilspy|dnSpy|IronNestCoop' -- .
+git grep -n -I -E 'decompiled|ilspy|dnSpy' -- .
+# 再按私有仓记忆文件里的「闭源模组名清单」逐个搜一遍（名字本身不进公开树，故此处不列举）
 ```
 
 （闭源模组名的完整清单在私有仓库的记忆文件里，公开仓**不重复列举**——名字本身也不要进公开树。）

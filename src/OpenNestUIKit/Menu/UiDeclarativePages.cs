@@ -26,6 +26,16 @@ public sealed class DeclarativePage : UiPage
     private readonly Dictionary<string, Widgets.UiWidget> _byKey = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<Native.UiHotZone> _hintBound = new();     // 已绑过悬停提示的热区（防重复串联）
     private Widgets.UiList _list;
+    /// <summary>本页是否是**两栏（桌面式）**：含 `Columns` 行时，外层不滚动、左右栏各自滚。构建期决定。</summary>
+    private bool _twoPane;
+
+    private static bool HasColumns(List<UiRow> rows)
+    {
+        if (rows == null) return false;
+        for (int i = 0; i < rows.Count; i++)
+            if (rows[i] != null && rows[i].Kind == UiRowKind.Columns) return true;
+        return false;
+    }
 
     public DeclarativePage(string id, string title, IReadOnlyList<UiRow> rows, Func<string, UiPage> resolveNav, IUiPageDef def = null)
     {
@@ -50,8 +60,15 @@ public sealed class DeclarativePage : UiPage
         _extras.Clear();
         _byKey.Clear();
         _hintBound.Clear();
-        _list = Widgets.UiList.Create(parent, 520f);
+        // ⚠ 外层列表必须**铺满宿主**（`height <= 0` ⇒ `UiStretch.Fill`）。
+        //   以前写死 `520f`：既用不满内容区（窗口 700 时可用 ~600），又让内容一超过 520 就冒出垂直滚动条。
+        _list = Widgets.UiList.Create(parent, 0f);
         Root = _list.Rect;
+
+        // **两栏（含 `Columns`）页 = 桌面式**：外层不滚动（内容高 = 视口高），左右栏各自内部滚动。
+        //   用户：“左右两块外面那个块还是被撑大了，而且有滚动条” —— 真因就是内容高超过外层视口。
+        _twoPane = HasColumns(_rows);
+        if (_twoPane) { try { _list.Flow.AutoHeight = false; } catch { } }
         Render();
     }
 
@@ -102,6 +119,10 @@ public sealed class DeclarativePage : UiPage
 
             case UiRowKind.Label:
                 return Add(flow, Widgets.UiText.Create(flow.Rect, row.Label, Widgets.UiTextKind.Note), Layout.UiSize.Auto);
+
+            case UiRowKind.Info:
+                // 键值行：标签列固定宽 + 值列左对齐（扁平工业风的属性表版式）
+                return Add(flow, Widgets.UiKvRow.Create(flow.Rect, row.Label, row.Value), Layout.UiSize.Auto);
 
             case UiRowKind.Nav:
                 {
@@ -155,7 +176,7 @@ public sealed class DeclarativePage : UiPage
                     int sel = 0;
                     try { int.TryParse(row.Value, out sel); } catch { }
                     return Add(flow, Widgets.UiTabs.Create(flow.Rect, arr.ToArray(), sel,
-                        i => Write(row, i.ToString())), Layout.UiSize.Auto);
+                        i => Write(row, i.ToString()), zonePrefix: row.Key), Layout.UiSize.Auto);
                 }
 
             case UiRowKind.Progress:
@@ -223,8 +244,11 @@ public sealed class DeclarativePage : UiPage
         {
             var items = new List<string>();
             if (row.Choices != null) for (int i = 0; i < row.Choices.Count; i++) items.Add(row.Choices[i]);
+            var hints = new List<string>();
+            if (row.ListHints != null) for (int i = 0; i < row.ListHints.Count; i++) hints.Add(row.ListHints[i]);
 
-            float h = row.ListHeight > 40f ? row.ListHeight : 240f;
+            float h = row.ListHeight < 0f ? 0f : (row.ListHeight > 40f ? row.ListHeight : 240f);
+            bool grow = row.ListHeight < 0f;      // 负值 = 吃掉剩余高度
             var list = Widgets.UiList.Create(flow.Rect, h, !string.IsNullOrEmpty(row.Key) ? row.Key : "select");
             _widgets.Add(list);
 
@@ -234,17 +258,21 @@ public sealed class DeclarativePage : UiPage
             for (int i = 0; i < items.Count; i++)
             {
                 int index = i;
-                var nav = Widgets.UiNavRow.Create(list.Flow.Rect, items[i], null,
+                // 副文本（右对齐一列，如“2.3.2 · 已加载”）：信息型列表的核心排版
+                string hint = i < hints.Count ? hints[i] : null;
+                var nav = Widgets.UiNavRow.Create(list.Flow.Rect, items[i], hint,
                     () =>
                     {
                         Write(row, index.ToString());
                         UiMenuWindow.ReloadCurrentPage();      // 选中高亮要重画（第三方只需保存索引）
                     }, zoneName: "pick:" + (row.Key ?? "") + ":" + index,
                     selected: index == sel, arrowText: "");
+                // 主文本/副文本都单行省略（用户：“左侧列表没有最大字符数量限制”）
+                try { nav.SetSingleLine(true); } catch { }
                 list.Add(nav, Layout.UiSize.Auto);
             }
             list.ApplyLayout();
-            flow.Child(new Layout.RectElement(list.Rect), Layout.UiSize.Fixed(h));
+            flow.Child(new Layout.RectElement(list.Rect), grow ? Layout.UiSize.Grow(1f) : Layout.UiSize.Fixed(h));
             return list;
         }
         catch (Exception ex)
@@ -262,12 +290,13 @@ public sealed class DeclarativePage : UiPage
     {
         try
         {
-            float h = row.ListHeight > 40f ? row.ListHeight : 240f;
+            float h = row.ListHeight < 0f ? 0f : (row.ListHeight > 40f ? row.ListHeight : 240f);
+            bool grow = row.ListHeight < 0f;      // 负值 = **吃掉剩余高度**（两栏页的栏内列表用）
             var list = Widgets.UiList.Create(flow.Rect, h, !string.IsNullOrEmpty(row.Key) ? row.Key : "list");
             _widgets.Add(list);
             BuildRows(row.ListRows, list.Flow);
             list.ApplyLayout();
-            flow.Child(new Layout.RectElement(list.Rect), Layout.UiSize.Fixed(h));
+            flow.Child(new Layout.RectElement(list.Rect), grow ? Layout.UiSize.Grow(1f) : Layout.UiSize.Fixed(h));
             return list;
         }
         catch (Exception ex)
@@ -298,29 +327,37 @@ public sealed class DeclarativePage : UiPage
             float leftW = row.LeftWidth > 40f ? row.LeftWidth : 260f;
             float gap = row.ColumnGap > 0f ? row.ColumnGap : Theme.UiTheme.Gap;
 
-            // 左栏：固定宽（top-left 锚）
+            // 左 / 右栏：宽度**全交给 host 的横向 flow**（左固定宽 + 右吃剩余），并在末尾把这个 flow 挂进页面流。
+            //
+            // ⚠ 2026-09-13 真因（用户：“ModMenu 右侧块宽度没有撑满宽度”）：以前用 anchor + sizeDelta 手算宽度，
+            //   而 **首次** `lf/rf.Apply()` 会把 `colL/colR` 改成**点锚**并把“当时的宽”钉死（= 页面构建时
+            //   宿主还是兜底宽 ⇒ `colR` 只有 340）；之后容器变宽也不会再跟着变（点锚不再随父）。
+            //   改成 flow 之后：宽度由 `columns` 的**实际宽**分配，而且页面流 `Apply()` 会递归 Apply 它
+            //   （`IsFlow`）⇒ 尺寸后到 / 窗口尺寸变化时右栏宽度自动跟上。
             var left = UI.UiKit.MakeRect("colL", host, new Vector2(0f, 1f), new Vector2(0f, 1f),
                 Vector2.zero, Vector2.zero, new Vector2(0f, 1f));
-            try { left.sizeDelta = new Vector2(leftW, 10f); left.anchoredPosition = Vector2.zero; } catch { }
-            // 右栏：横向拉伸到容器右边（只给左侧偏移）
-            var right = UI.UiKit.MakeRect("colR", host, new Vector2(0f, 1f), new Vector2(1f, 1f),
+            var right = UI.UiKit.MakeRect("colR", host, new Vector2(0f, 1f), new Vector2(0f, 1f),
                 Vector2.zero, Vector2.zero, new Vector2(0f, 1f));
-            try
-            {
-                right.offsetMin = new Vector2(leftW + gap, 0f);
-                right.offsetMax = new Vector2(0f, 0f);
-                right.sizeDelta = new Vector2(Mathf.Max(40f, 10f), 10f);
-            }
-            catch { }
 
-            var lf = new Layout.UiFlow(left) { Axis = Layout.UiAxis.Vertical, Gap = Theme.UiTheme.RowGap, CrossStretch = true, AutoHeight = true };
-            var rf = new Layout.UiFlow(right) { Axis = Layout.UiAxis.Vertical, Gap = Theme.UiTheme.RowGap, CrossStretch = true, AutoHeight = true };
+            var lf = new Layout.UiFlow(left) { Axis = Layout.UiAxis.Vertical, Gap = Theme.UiTheme.RowGap, CrossStretch = true, AutoHeight = !_twoPane };
+            var rf = new Layout.UiFlow(right) { Axis = Layout.UiAxis.Vertical, Gap = Theme.UiTheme.RowGap, CrossStretch = true, AutoHeight = !_twoPane };
+            // 横向容器：先定左右栏宽度，再让各自的竖向流排行（递归顺序就是这里给的）
+            var hf = new Layout.UiFlow(host)
+            {
+                Axis = Layout.UiAxis.Horizontal,
+                Padding = new Layout.UiPadding(),
+                Gap = gap,
+                CrossStretch = true,
+                AutoHeight = true,
+            };
+            hf.Child(new Layout.RectElement(left), Layout.UiSize.Fixed(leftW));
+            hf.Child(new Layout.RectElement(right), Layout.UiSize.Grow(1f));
 
             BuildRows(row.LeftRows, lf);
             BuildRows(row.RightRows, rf);
 
-            // 量一次高（未定宽时下一帧 flow 会重排，高度仍由测量回调重新取）
-            try { lf.Apply(); } catch { }
+            try { hf.Apply(); } catch { }        // ① 先给左右栏定宽（否则行宽会按旧宽排）
+            try { lf.Apply(); } catch { }        // ② 再排各自的竖向内容
             try { rf.Apply(); } catch { }
             float lh = lf.ContentHeight, rh = rf.ContentHeight;
             Layout.UiFlow.Find(left)?.Apply();
@@ -336,7 +373,10 @@ public sealed class DeclarativePage : UiPage
             // ⚠ 必须把容器**挂进上层流**：不挂的话它不会被测量/排列，
             //   高度停在初值（实测 64）→ 页面内容高算错（滚动条/裁剪跟着错），
             //   只是子节点仍按各自列宽画出来，看起来“好像没问题”。
-            flow.Child(new Layout.RectElement(host), Layout.UiSize.Auto);
+            //   ⚠ 这里挂的是 **flow 本身**（不是 `RectElement(host)`）：`UiFlow.IsFlow` 才会让上层流递归 Apply 它
+            //   ⇒ 容器尺寸后到（构建时还是兜底宽）时右栏宽度能自己跟上。
+            // 两栏页还得**吃掉剩余高度**（Grow）：外层不滚动时，这就是“左右栏填满内容区”的关键。
+            flow.Child(hf, _twoPane ? Layout.UiSize.Grow(1f) : Layout.UiSize.Auto);
             return null;
         }
         catch (Exception ex)

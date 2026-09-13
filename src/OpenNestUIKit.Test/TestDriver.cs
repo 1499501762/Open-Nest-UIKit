@@ -432,6 +432,47 @@ internal sealed class TestDriver
                 Done();
                 break;
 
+            case "mockcfg":
+                // `mockcfg` = 缺失才写；`mockcfg!` = 强制重建（验收自动生成的配置控件用）
+                MockConfig.Ensure(force: (arg ?? "").Trim() == "!");
+                Done();
+                break;
+
+            case "imedecide":
+                // `imedecide:<native>|<cached>|<cur>`（空格写 `_`）：**纯规则回归**，不靠真输入法。
+                // 用来固定“原生串=拼音不追加 / 组合串=汉字才追加”这套判据（见 UiTextRouter.ImeDecision）。
+                {
+                    var parts = (arg ?? "").Split('|');
+                    string nat = parts.Length > 0 ? parts[0].Replace('_', ' ') : "";
+                    string cac = parts.Length > 1 ? parts[1].Replace('_', ' ') : "";
+                    string cur = parts.Length > 2 ? parts[2].Replace('_', ' ') : "";
+                    TestLog.Pass("imedecide", Widgets.UiTextRouter.ImeDecision(nat, cac, cur, ""));
+                    Done();
+                    break;
+                }
+
+            case "imefake":
+                // `imefake:<文本>` 冒充 GCS_RESULTSTR（空格写 `_`；空 = 清除）。
+                // 复现/回归“持值串回填”：同一条串会被反复返回 ⇒ 重新聚焦时**不得**再补进空框。
+                {
+                    string v = arg ?? "";
+                    Widgets.UiTextRouter.FakeImeResult = v.Length == 0 ? null : v.Replace('_', ' ');
+                    TestLog.Pass("imefake", Widgets.UiTextRouter.FakeImeResult == null ? "已清除（走系统 IME）" : $"已伪造='{Widgets.UiTextRouter.FakeImeResult}'");
+                    Done();
+                    break;
+                }
+
+            case "imecomp":
+                // `imecomp:<文本>` 冒充**一帧**的 compositionString（下一帧消失 ⇒ 触发“组合结束”那条通道）。
+                // 用来回归“同一次提交被两条通道各送一次”的重复问题（配 imefake 使用）。
+                {
+                    string v = arg ?? "";
+                    Widgets.UiTextRouter.FakeComposition = v.Length == 0 ? null : v.Replace('_', ' ');
+                    TestLog.Pass("imecomp", Widgets.UiTextRouter.FakeComposition == null ? "已清除" : $"已注入一帧组合串='{Widgets.UiTextRouter.FakeComposition}'");
+                    Done();
+                    break;
+                }
+
             case "chain":
                 TestLog.Note("chain", Chain());
                 Done();
@@ -556,11 +597,36 @@ internal sealed class TestDriver
                 NativeOpen(arg);
                 break;
 
+            case "chatdemo":
+                // 测试专用（2026-09-13 用户：“Chat 左侧框没有聊天记录 / 失去聚焦模式背景不够透明”）：
+                // **不依赖联机会话**，直接给悬浮聊天层注册 N 条假消息（`arg` = 条数，默认 8）——
+                // 让 `listprobe` / `chatprobe` / `shot:` 能确定性验证“框里到底有没有记录、收起态背景 alpha”。
+                // 注：故意**不展开**（保持收起态）；要展开就接 `chatopen`。
+                {
+                    int n = 8;
+                    if (!int.TryParse(arg, out n) || n <= 0) n = 8;
+                    var demo = new List<string>();
+                    for (int i = 1; i <= n; i++) demo.Add($"测试消息 {i} / sample line {i}");
+                    Widgets.UiChatOverlay.SetFromHost("Chat", () => demo, _ => { }, () => "回车 打开聊天");
+                    TestLog.Note("chatdemo", $"已注入 {n} 条假消息");
+                    Done();
+                }
+                break;
+
             case "chatopen":
                 // 测试专用：直接展开并聚焦悬浮聊天输入框（不靠回车）——用来把“回车没被看到”
                 // 与“输入框/发送本身有问题”两件事分开验证。
                 Widgets.UiChatOverlay.Focus();
                 TestLog.Note("chatopen", Widgets.UiChatOverlay.Probe());
+                Done();
+                break;
+
+            case "chatclose":
+                // 测试专用（2026-09-13 用户：“Chat 失去焦点之后无法与菜单交互”）：
+                // 直接收起悬浮聊天层（= ESC / 发送后的同一条路径），配合 `widgetprobe` 看
+                // **输入管线聚焦**与**拦截层（游戏输入模块启用数）**是否回到常态。
+                Widgets.UiChatOverlay.Close();
+                TestLog.Note("chatclose", Widgets.UiChatOverlay.Probe());
                 Done();
                 break;
 

@@ -57,6 +57,10 @@ public static class TestRuntime
             }
             catch (Exception ex) { TestLog.Fail("测试页注册", ex.Message); }
 
+            // 2b) 模拟配置文件（只补不覆盖）：让「设置」页有全类型的自动生成控件可验收
+            try { MockConfig.Ensure(force: false); }
+            catch (Exception ex) { TestLog.Note("mockcfg", "跳过：" + ex.Message); }
+
             // 3) CLI 驱动
             _driver = new TestDriver(Environment.GetCommandLineArgs());
             Mount();

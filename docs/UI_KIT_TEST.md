@@ -1,6 +1,17 @@
 # 测试模组与 CLI 自动化（`OpenNestUIKit.Test`）
 
 > **更新记录**：
+> - 2026-09-13（二十二）**新增 `chatclose`；摸清 `scroll:` 的寻址陷阱**：
+>   ① `chatclose` = 直接收起悬浮聊天层（= ESC/发送后的同一条路径），用于验证“收起后输入管线聚焦与拦截层是否回到常态”。
+>   ② ⚠ `scroll:<热区>:±N` 是**子串匹配 + 后登记优先**：写 `scroll:chat-list` 会先命中 `chat-list-scrollbar`（无 `OnScroll`）
+>      → 报 `该热区不支持滚轮`；验证聊天浮窗滚动要写 **`scroll:chat-list-viewport:±N`**。
+>      成功时 `listprobe` 会打 `滚轮：上次原始=360 → 3 格，发给 'chat-list-viewport'`（方方 3×42=126px）。
+>   ③ 本轮用它捶定：菜单关着时 `UiPointerRouter` 不 Active（浮窗热区全死）、`chat-open` 抢点击。
+> - 2026-09-13（二十一）**新增 `chatdemo:<条数>`**：不依赖联机会话，直接给悬浮聊天层**灌 N 条假消息**（默认 8）并注册
+>   （**故意保持收起态**，要展开就接 `chatopen`）。用途：确定性验证“左侧 Chat 框到底有没有记录 / 收起态背景多透”
+>   —— 配合 `listprobe`（行数/内容高/视口/**可见行号区间**）、`chatprobe`（**面板背景 alpha / 列表高**）与 `shot:`。
+>   同时 `chatprobe` 的探针串新增 **面板背景 alpha** 与 **列表高** 两项（透明度和几何一眼可验）。
+>   本次用它捶定两个 bug：`UiList` 一次重排不收敛（内容高写 0 → `RectMask2D` 裁光）、`UiChatOverlay` 把面板宽写成绝对宽。
 > - 2026-09-13（二十）**新增 `clickgame:<对象名片段>`**：点**游戏自己**的 UGUI 按钮（跳过我们注入的 `OpenNestUIKit_*`），
 >   例 `clickgame:OpenSettingsBtn` → 剪贴板翻到**原生 Settings 页**，于是能对着**原生控件**截图量颜色/圆角/几何
 >   （这是“原生到底长什么样”的唯一可靠办法，比 `pagespec` 的文字 dump 更直观）。
@@ -188,12 +199,35 @@ dotnet build src\OpenNestUIKit.Test.MelonMod\OpenNestUIKit.Test.MelonMod.csproj 
 | `perf[:reset]` | 打印本模组的帧耗时（Update/LateUpdate 平均与最大，滚动窗口）+ 拦截层耗时拆分（Apply / 交互锁收集 / 原生搜索 / 入队）；`perf:reset` 清零后测更准 |
 | `listprobe` | 所有存活列表的状态：行数/内容高/视口/可滚量/当前偏移/**可见行号区间**/**滚动条是否显示** + 上次滚轮原始值与分发对象 + 拖拽仲裁诊断 |
 | `widgetprobe` | 五组状态一次打完：滑块（值/范围/比例/**锚点比例 vs 实测屏幕比例**）、输入框（文本/聚焦）、**输入管线**（IME 锚点/组合中/最近原生提交）、**悬浮聊天层**、**语言探测**、拦截层（模块启用数）、列表（内容高/可滚/滚动条） |
-| `chatprobe` | 悬浮聊天层状态：注册 / id / 展开 / 行数 / 输入框聚焦 / 菜单是否打开 |
+| `chatprobe` | 悬浮聊天层状态：注册 / id / 展开 / 行数 / **面板背景 alpha / 列表高** / 输入框聚焦 / 菜单是否打开 |
+| `chatdemo:<条数>` | **注入假聊天**（默认 8 条；不依赖联机会话）并注册悬浮聊天层（保持收起态）—— 验证“框里有没有记录 / 收起态透明度”；接 `chatopen` 看展开态，配 `listprobe` 看几何 |
+| `chatclose` | 收起悬浮聊天层（= ESC/发送后的同一条路径）；配 `widgetprobe` 看输入管线聚焦与拦截层是否回到常态 |
 | `type:<文本>` | 向当前聚焦的输入框斟入文本（原生路径只改 TMP 框 text，验证“回写 → OnChanged”链路） |
 | `vdrag:<热区>:<像素>` | 垂直拖动（屏幕坐标向上移 N 像素再松手）——验证“按住拖动滚动”（行盖在视口上时要靠点击/滚动仲裁） |
 | `lock:on|off` | 交互锁开关（默认 **off**；on = 旧行为：禁用场景里的交互组件） |
+| `mockcfg[!]` | **写测试模组自己的模拟配置文件**（`BepInEx\config\open.nest.uikit.test.cfg`）：`mockcfg` = 缺失才写、`mockcfg!` = 强制重建。启动时也会自动补一次（缺才写）。 |
+| `imefake:<文本>` | **冒充 `GCS_RESULTSTR` 的返回值**（空格写 `_`；空 = 清除）——复现/回归“持值串回填”（同一条串会被反复返回 ⇒ 重新聚焦时**不得**再补进空框）。真实输入法没法自动化，这是它的可回归替身。 |
+| `imecomp:<文本>` | **冒充一帧的 `compositionString`**（空 = 清除）——下一帧它就“结束”从而触发“组合结束”那条通道；与 `imefake` 搭配可离线造出“同一次提交被两条通道各送一次”的重复场景。 |
+| `imedecide:<native>\|<cached>\|<cur>` | **IME 提交判据回归**（纯函数，不需要真输入法）：打印两条通道的决策（`native=append/skip(无CJK=拼音)`、`cached=append/skip`）—— 锁住“拼音不进框、汉字才追加、不重复追加”这套规则（见 `docs/UI_KIT.md` 更新记录四十六）。 |
 
 切片相关命令细节与定义文件格式见 `docs/UI_KIT_SLICE.md`。
+
+### `mockcfg`：验收“自动生成的配置控件”（2026-09-13 六）
+
+用户：“给测试模组做个模拟配置文件，看看自动生成的配置控件够不够好用”。
+
+```powershell
+steam.exe -applaunch 2950790 -onuktest-run="wait:12000;mockcfg;open:provider:open-nest-mod-menu;wait:2500;tap:pick:mm.list:<行号>;wait:1600;tap:tab:mm.tabs:1;wait:2000;shot:p5;report"
+```
+
+- 文件落到 `BepEx\config\open.nest.uikit.test.cfg`（BepInEx 的 `<GUID>.cfg` 惯例；MLL 原生端退 `UserData\`）
+  ⇒ 模组菜单靠加载器元数据**直接命中**，不需要任何映射。
+- 覆盖项：bool / int + 范围 / float + 步进 / 枚举（含中文选项）/ 快捷键 / 文本 / **空文本**（验“空值要画成可输入的空框”）/
+  只读（声明 `ReadOnly` 才真只读）/ 无类型声明（按值推断）/ 多 `[Section]` / 项目风格“键后注释”元数据（`## 类型: 数值 | 默认: 3 | 范围: 0..10`）。
+- 控件由 `ModMenuSettingsSource.Rows()` → `UiSetting` → UIKit `AddRow`（或自带 `ModMenuSettingsView`）生成：
+  **两套界面同一数据源**，所以两边应该看到同样的行；实测该文件被解析成 **13 项**并全部绑上控件。
+- 配套钩子：`-onnmm-selftest-tab=settings:<Id 匹配串>`（ModMenu 侧）可自动选中该模组 + 切到设置页；
+  行号可以用 `listprobe:mm.list`（行数/可见行区间）+ 左栏截图确认（行热区名 `pick:mm.list:<i>`）。
 
 ### 为什么"模拟点击"可信
 

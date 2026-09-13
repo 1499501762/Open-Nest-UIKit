@@ -145,6 +145,18 @@ public static class ModStyle
         img.raycastTarget = false;
     }
 
+    /// <summary>顶部发丝线（贴父容器上沿 1px，**不占布局高度**）—— 扁平工业风的"分格线"。</summary>
+    public static void TopRule(Transform parent, Color c, float t = OutlineW)
+        => Edges(parent, "rule.t", c, 0f, 0f, Anchor.Top, t);
+
+    /// <summary>底部发丝线（贴父容器下沿 1px，**不占布局高度**）。行与行之间靠它形成网格。</summary>
+    public static void BottomRule(Transform parent, Color c, float t = OutlineW)
+        => Edges(parent, "rule.b", c, 0f, 0f, Anchor.Bottom, t);
+
+    /// <summary>左侧发丝线。</summary>
+    public static void LeftRule(Transform parent, Color c, float t = OutlineW)
+        => Edges(parent, "rule.l", c, 0f, 0f, Anchor.Left, t);
+
     /// <summary>
     /// 建**模组风格**的一行（原生 ESC 菜单里的入口 / 我们的原生页行）：
     /// 扁平底 + 描边 + 左强调条 + 靠左文字，悬停/按下用自己的色。

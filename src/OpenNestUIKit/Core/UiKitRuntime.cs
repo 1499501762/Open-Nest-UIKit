@@ -117,6 +117,8 @@ public static class UiKitRuntime
         // 悬浮聊天层（第三方注册 → 宿主渲染；回车唤入 / 回车发送 / ESC 收起）
         try { UiKitHost.SetChatControls(Widgets.UiChatOverlay.SetFromHost, Widgets.UiChatOverlay.Clear, Widgets.UiChatOverlay.Focus, Widgets.UiChatOverlay.Close); }
         catch (Exception ex) { CoopLog.Warn("uikit.start", () => $"SetChatControls failed: {ex.Message}"); }
+        try { UiKitHost.SetFooterControl(Menu.UiMenuWindow.SetFooter); }
+        catch (Exception ex) { CoopLog.Warn("uikit.start", () => $"SetFooterControl failed: {ex.Message}"); }
 
         CoopLog.Info("uikit.start", () => $"started in {sw.ElapsedMilliseconds} ms");
     }

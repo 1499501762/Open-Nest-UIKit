@@ -30,6 +30,11 @@ public static class UiChatOverlay
     private const int MaxLines = 40;          // 最多拉多少条（只渲染最后 ~8 条可见）
     private const float PanelW = 340f, PanelH = 190f;
     private const float Margin = 16f;
+    // 面板内部分区（改这里就会同步到列表高度 —— 用户 2026-09-13：“回车 打开聊天和最后一条消息重叠了”）：
+    //   标题条 24（顶）+ 列表 + （收起：提示行 24 / 展开：输入行 30）+ 上下各 6 间隙
+    private const float HeaderH = 24f, HintH = 24f, InputH = 30f, Gap = 6f;
+    private const float ListH_Collapsed = PanelH - HeaderH - HintH - Gap * 2f;   // 190-60 = 130（标题 24 + 提示行 24 + 上下 6/6）
+    private const float ListH_Expanded  = PanelH - 74f;                          // 190-74 = 116（底部让给 30 高输入行；实测不重叠，保持原值）
 
     private static string _id;
     private static string _title = "Chat";
@@ -43,7 +48,9 @@ public static class UiChatOverlay
     private static UiList _list;
     private static UiText _hintText;
     private static UiTextInput _input;
-    private static Image _inputBg;
+    // ❌ 不要用 `_panelBg` 兼作输入框背景——那会把“收起时更透（0.34）”覆盖成不透明，
+    //    用户现象：“失去聚焦模式背景没有足够透明”（2026-09-13）。输入框背景由 `UiTextInput` 自管。
+    private static Native.UiHotZone _openZone;   // “点浮窗展开”热区（展开时禁用，否则会吃掉列表的点击/滚轮）
 
     private static bool _expanded;
     private static float _pollT;
@@ -85,11 +92,18 @@ public static class UiChatOverlay
         try
         {
             if (Focused) UiTextRouter.SetFocused(null);
+            // ⚠ 2026-09-13：**必须先注销热区再销毁画布**。以前这里只 Destroy，热区会永久留在
+            //    `UiPointerRouter._zones` 里（Rect 已销毁，每帧靠 try/catch 跳过）——反复进出会话就不断累积，
+            //    且被销毁的 Rect 仍可能命中到“上一帧还没真的销毁”的对象。
+            if (_openZone != null) Native.UiPointerRouter.Remove(_openZone);
+            if (_list != null) Native.UiPointerRouter.RemoveOwner(_list);
             if (_canvas != null) UnityEngine.Object.Destroy(_canvas.gameObject);
         }
         catch { }
         _canvas = null; _root = null; _panel = null; _panelBg = null; _inputRow = null;
-        _list = null; _hintText = null; _input = null; _inputBg = null;
+        _list = null; _hintText = null; _input = null; _openZone = null;
+        // 浮窗没了：若菜单也没开，路由器该回到“停摆”（它默认只在菜单/原生页打开时工作）。
+        try { if (!Menu.UiMenuWindow.IsOpen) Native.UiPointerRouter.Deactivate(); } catch { }
     }
 
     /// <summary>展开输入并聚焦（回车唤入 / 点浮窗）。</summary>
@@ -98,8 +112,15 @@ public static class UiChatOverlay
         if (!Has) return;
         try
         {
+            bool wasOpen = _expanded;
             SetExpanded(true);
-            if (draft != null && _input != null) _input.Value = draft;
+            if (_input != null)
+            {
+                // draft 显式给了就用它；**全新展开（之前是收起态）一律清空** ——
+                // 否则上次发完/清空后残留的文本会跟着一起回来（用户 2026-09-13：“上一条输入的信息还在”）。
+                if (draft != null) _input.Value = draft;
+                else if (!wasOpen) _input.Value = "";
+            }
             _input?.Focus();
             _focusAt = Time.realtimeSinceStartup;
         }
@@ -123,6 +144,18 @@ public static class UiChatOverlay
         if (!Has) return;
         try
         {
+            // ⓪ **浮窗在，指针路由就必须活着**。
+            //    `UiPointerRouter.Activate()` 原先只在菜单/原生页打开时调，而 `Tick` 第一行就是 `if (!Active) return;`
+            //    ⇒ **菜单关着时**浮窗的热区全部失效（用户 2026-09-13：“滚轮不生效、无法点击”）。
+            //    这里每帧兵底（`UiMenuWindow.Close` 会 Deactivate，但浮窗可能还在）。
+            if (!Native.UiPointerRouter.Active) Native.UiPointerRouter.Activate();
+
+            // ⓪' **菜单打开时把“点浮窗展开”热区让出去**（用户 2026-09-13：“Chat 失去焦点之后无法与菜单交互”）。
+            //   命中规则是“后登记优先”，而浮窗可能在菜单**之后**才注册（先开菜单、再进会话）——
+            //   那样 `chat-open` 会压在菜单热区上，与菜单重叠的那块就点不动了。菜单开着时用户本来也不需要
+            //   点浮窗（想聊天直接点菜单里的聊天页签），所以直接禁用。
+            if (_openZone != null) _openZone.Enabled = !_expanded && !Menu.UiMenuWindow.IsOpen;
+
             // ① 历史内容变化 → 重建（节流 0.4s；内容 signature 变了才重建）
             _pollT += dt;
             if (_pollT >= 0.4f) { _pollT = 0f; RefreshLines(force: false); }
@@ -138,8 +171,12 @@ public static class UiChatOverlay
             //    ⚠️ 回车判定走 `UiTextRouter.EnterThisFrame`（物理上升沿 + 单帧脉冲 + 文本通道 \r 三通道，
             //       比只看 wasPressedThisFrame 稳）；`ConsumedEnter` = 同一次回车已经被输入框提交用掉了，
             //       不能再用它重新展开（否则刚收起的聊天框会立刻弹回来）。
+            //    ⚠ 还要加一道**提交冷却**：中文输入法里“回车确认候选词”会从文本通道发一个 \r，
+            //       它不会走提交分支（当时还在组合中）⇒ `ConsumedEnter` 是 false ⇒ 刚发完的消息框又被弹开
+            //       （用户 2026-09-13：“回车发送之后又唤起输入了”）。
             if (!_expanded && !UiTextRouter.Typing && !UiTextRouter.Composing
-                && !Menu.UiMenuWindow.IsOpen && !UiTextRouter.ConsumedEnter && UiTextRouter.EnterThisFrame)
+                && !Menu.UiMenuWindow.IsOpen && !UiTextRouter.ConsumedEnter && UiTextRouter.EnterThisFrame
+                && Time.realtimeSinceStartup - UiTextRouter.LastSubmitAt > 0.35f)
             {
                 Focus();
             }
@@ -162,8 +199,20 @@ public static class UiChatOverlay
             }
             if (_inputRow != null && _inputRow.gameObject.activeSelf != on) _inputRow.gameObject.SetActive(on);
             if (_hintText != null) _hintText.Visible = !on;
-            if (_list != null) _list.Rect.sizeDelta = new Vector2(PanelW - 16f, on ? PanelH - 74f : PanelH - 30f);
-            if (_inputBg != null) _inputBg.color = on ? new Color(0.086f, 0.114f, 0.153f, 1f) : Theme.UiTheme.InputBg;
+            // ⚠ 2026-09-13（用户：“无法点击/滚轮不生效”）：展开时**关掉“点浮窗展开”热区** —— 它建在列表之后
+            //   （后登记=优先，为了“点任意处展开”），不关就会把列表区域的点击/滚动条点击全部吃掉。
+            if (_openZone != null) _openZone.Enabled = !on;
+            // ⚠ 2026-09-13（用户：“Chat 滚动应该默认在最底”）：`sizeDelta.x` 必须是**相对父宽的增减**（`-16`），
+            //   不能写绝对宽 `PanelW - 16` —— 列表的水平 anchor 是 (0,1)-(1,1) 拉伸态，
+            //   写 324 时实际宽 = 父宽 + 324，配合居中 pivot 会把整块内容推到面板**左边框之外**
+            //   （短的聊天行一条都看不见，看起来就是“框里没记录”）。
+            if (_list != null)
+            {
+                _list.Rect.sizeDelta = new Vector2(-16f, on ? ListH_Expanded : ListH_Collapsed);
+                _list.ApplyLayout();     // 视口高变了 → 立刻重算内容高与滚动范围（不然滚动上限按旧高度算）
+                // 视口变矮 → 可滚量变大，旧偏移就不在底部了 → 重新滚到底（聊天默认看最新）
+                _list.ScrollBy(float.MaxValue);
+            }
         }
         catch { }
     }
@@ -204,15 +253,17 @@ public static class UiChatOverlay
         title.Color = Theme.UiTheme.Accent;
 
         // 历史列表（自己的滚动条；鼠标穿透：raycastTarget 关掉）
-        _list = UiList.Create(_panel, PanelH - 30f, "chat-list");
+        // ⚠ 视口高度必须给**收起态**的值，且底部要给提示行留位置 —— 以前用 `PanelH - 30`（只扣了标题+间隙），
+        //   列表底边压到提示行上 18px ⇒ “回车 打开聊天”与最后一条消息重叠（用户 2026-09-13）。
+        _list = UiList.Create(_panel, ListH_Collapsed, "chat-list");
         try
         {
             _list.Rect.anchorMin = new Vector2(0f, 1f);
             _list.Rect.anchorMax = new Vector2(1f, 1f);
             _list.Rect.pivot = new Vector2(0.5f, 1f);
-            _list.Rect.offsetMin = new Vector2(8f, -(PanelH - 30f) - 24f);
-            _list.Rect.offsetMax = new Vector2(-8f, -24f);
-            _list.Rect.sizeDelta = new Vector2(-16f, PanelH - 30f);
+            _list.Rect.offsetMin = new Vector2(8f, -HeaderH - ListH_Collapsed);
+            _list.Rect.offsetMax = new Vector2(-8f, -HeaderH);
+            _list.Rect.sizeDelta = new Vector2(-16f, ListH_Collapsed);
         }
         catch { }
 
@@ -243,10 +294,13 @@ public static class UiChatOverlay
             _inputRow.sizeDelta = new Vector2(-16f, 30f);
         }
         catch { }
-        _inputBg = _panelBg;
 
-        // 点击浮窗 = 展开并聚焦（自管指针热区，覆盖整个浮窗）
-        Native.UiPointerRouter.Add(new Native.UiHotZone
+        // 点击浮窗 = 展开并聚焦（自管指针热区，覆盖整个浮窗）。
+        // ⚠ 2026-09-13（用户：“无法点击”）：登记顺序很关键——命中规则是**后登记优先**，
+        //   而这个热区要盖住列表视口才能“点面板任意处展开”，所以**必须建在列表之后**；
+        //   代价是它会同时吃掉列表区域的点击/滚动条点击 → 所以**展开态由 `SetExpanded` 把它禁用**，
+        //   把整个面板让给列表（收起态仍能：点=展开、按住拖/滚轮=滚历史，后两者走仲裁与 HitTopScrollable）。
+        _openZone = Native.UiPointerRouter.Add(new Native.UiHotZone
         {
             Name = "chat-open",
             Rect = _panel,
@@ -313,7 +367,13 @@ public static class UiChatOverlay
     {
         int n = 0;
         try { n = _list != null ? _list.Count : 0; } catch { }
+        float alpha = -1f;
+        try { if (_panelBg != null) alpha = _panelBg.color.a; } catch { }
+        int visVh = 0;
+        try { if (_list != null && _list.Rect != null) visVh = Mathf.RoundToInt(_list.Rect.rect.height); } catch { }
+        string openZone = _openZone == null ? "(无)" : (_openZone.Enabled ? "启用" : "禁用");
         return $"悬浮聊天层：注册={(Has ? "是" : "否")} id='{_id}' 展开={_expanded} 行数={n}"
+             + $" 面板背景alpha={alpha:0.00} 列表高={visVh} 展开热区={openZone}"
              + $"｜输入框聚焦={(_input != null && _input.Focused ? "是" : "否")} 菜单开={Menu.UiMenuWindow.IsOpen}"
              + $" 上次发送='{_lastSent}' 输入框文本='{(_input != null ? _input.Value : "-")}'"
              + $" 开{_openCount}/关{_closeCount} 最近关：{_lastClose}";

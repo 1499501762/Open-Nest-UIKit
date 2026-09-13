@@ -17,22 +17,41 @@ namespace OpenNestUIKit.Theme;
 public static class UiTheme
 {
     // ---------------- 调色板 ----------------
+    // ⚠ 2026-09-13（用户：“整个UI风格重新设计一下，不好看” → 选定方向“扁平化工业风”）：
+    //   取向 = **扁平工业**：冷灰钢底 + **1px 冷色描边** + **发丝分隔线** + 琥珀强调，**不用任何游戏装饰素材**。
+    //   三条硬规矩（改配色时别违反，观感就靠它们）：
+    //   ① 面与面之间**只用 1px 描边/发丝线分界**，不用阴影、渐变、圆角拟真；
+    //   ② 行**不画卡片底**（RowBg 与内容底同色）→ 整块看起来是没有内衬的钢面板 + 网格线，只有悬停/选中才上色；
+    //   ③ 强调统一用琥珀（<see cref="Accent"/>）+ 左侧竖条，不用大面积彩底。
 
-    public static readonly Color Backdrop = new Color(0f, 0f, 0f, 0.66f);
-    public static readonly Color WindowBg = new Color(0.055f, 0.070f, 0.094f, 0.985f);
-    public static readonly Color HeaderBg = new Color(0.086f, 0.110f, 0.145f, 1f);
-    public static readonly Color FooterBg = new Color(0.047f, 0.063f, 0.082f, 1f);
-    public static readonly Color ContentBg = new Color(0.071f, 0.086f, 0.110f, 1f);
-    public static readonly Color CardBg = new Color(0.098f, 0.118f, 0.149f, 1f);
-    public static readonly Color Border = new Color(0.165f, 0.196f, 0.239f, 1f);
+    public static readonly Color Backdrop = new Color(0f, 0f, 0f, 0.62f);
+    public static readonly Color WindowBg = new Color(0.078f, 0.086f, 0.098f, 0.99f);
+    public static readonly Color HeaderBg = new Color(0.110f, 0.122f, 0.137f, 1f);
+    public static readonly Color FooterBg = new Color(0.067f, 0.075f, 0.086f, 1f);
+    public static readonly Color ContentBg = new Color(0.078f, 0.086f, 0.098f, 1f);
+    public static readonly Color CardBg = new Color(0.098f, 0.108f, 0.122f, 1f);
+    public static readonly Color Border = new Color(0.216f, 0.235f, 0.263f, 1f);
+
+    /// <summary>发丝分隔线（1px）：行与行、块与块之间的网格线。**扁平工业风的层级主要靠它**（不靠明度阶梯）。</summary>
+    public static readonly Color Hairline = new Color(0.216f, 0.235f, 0.263f, 0.5f);
+
+    /// <summary>程序化描边粗细（1px 纯色块拼出来，与分辨率/素材倍率无关）。</summary>
+    public const float OutlineW = 1f;
+
+    /// <summary>键值行的**标签列宽**：详情页 `标签 | 值` 对齐成一列（值列从左边界起排，不右对齐）。</summary>
+    public static float KvLabelW = 76f;
 
     public static readonly Color Accent = new Color(0.878f, 0.635f, 0.235f, 1f);
     public static readonly Color AccentDim = new Color(0.560f, 0.400f, 0.150f, 1f);
 
-    public static readonly Color RowBg = new Color(0.086f, 0.106f, 0.133f, 1f);
-    public static readonly Color RowAlt = new Color(0.078f, 0.096f, 0.122f, 1f);
-    public static readonly Color RowHover = new Color(0.145f, 0.180f, 0.227f, 1f);
-    public static readonly Color RowSelected = new Color(0.130f, 0.196f, 0.286f, 1f);
+    // 行底：**与内容底同色**（扁平工业风：行不用卡片底，靠发丝线分界；只有悬停/选中才上色）
+    public static readonly Color RowBg = new Color(0.086f, 0.094f, 0.106f, 1f);
+    public static readonly Color RowAlt = new Color(0.082f, 0.090f, 0.102f, 1f);
+    public static readonly Color RowHover = new Color(0.157f, 0.169f, 0.184f, 1f);
+    /// <summary>选中行底色：**暗金**（与 <see cref="Accent"/> 呼应，工业拟真观感）。</summary>
+    public static readonly Color RowSelected = new Color(0.180f, 0.149f, 0.075f, 1f);
+    /// <summary>选中行文字（暗金底上要用米金色，普通白在暗金底上偏冷、对比也不够）。</summary>
+    public static readonly Color RowSelectedText = new Color(0.980f, 0.925f, 0.780f, 1f);
 
     public static readonly Color ButtonBg = new Color(0.118f, 0.145f, 0.184f, 1f);
     public static readonly Color ButtonPrimary = new Color(0.361f, 0.290f, 0.145f, 1f);

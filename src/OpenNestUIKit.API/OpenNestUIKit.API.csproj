@@ -6,7 +6,7 @@
     <Nullable>disable</Nullable>
     <AssemblyName>OpenNestUIKit.API</AssemblyName>
     <RootNamespace>OpenNestUIKit.API</RootNamespace>
-    <Version>0.0.1-Alpha-3</Version>
+    <Version>0.0.1-Alpha-4</Version>
     <!--
       OpenNestUIKit 契约程序集（纯 .NET：无 Unity / Il2CppInterop / 游戏程序集依赖）。
       用途：第三方模组只引用本 dll（**软依赖**）即可把自己的菜单页注册进原生 UI 库 ——

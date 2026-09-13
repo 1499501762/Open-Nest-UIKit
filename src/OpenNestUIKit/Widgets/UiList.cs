@@ -246,7 +246,14 @@ public sealed class UiList : UiWidget
             if (vw <= 1f) return;                       // 尺寸未定 → 由 TickAll 下一帧重试
             _lastW = vw;
 
-            if (_rt != null) Theme.UiTheme.SetRect(Content, 0f, 0f, Mathf.Max(40f, vw - BarW), ContentHeight);
+            // ⚠ 2026-09-13（用户：“左右两块外面那个块还是被撑大了，而且有滚动条” / 实测 `mm.list/viewport rect=440x0`）：
+            //   宿主 flow 声明 **不自适应高度**（两栏页的桌面式布局：Grow 子项要吃剩余高度）时，内容层必须**铺满视口**。
+            //   否则自引用：`flow.known` 取自内容层矩形，内容层高 = Σ子项高，子项（Grow）又依赖 known
+            //   → 收敛到 0 → 内嵌列表视口高 0、内容被 RectMask2D 整片裁光。
+            bool fillHost = Flow != null && !Flow.AutoHeight;
+
+            if (_rt != null) Theme.UiTheme.SetRect(Content, 0f, 0f, Mathf.Max(40f, vw - BarW),
+                                                   fillHost ? Mathf.Max(vh, 1f) : ContentHeight);
             Flow.Apply();
 
             // 内容高：**以 flow 的实际排列结果为准**。
@@ -269,6 +276,16 @@ public sealed class UiList : UiWidget
             }
             float rowsH = _rows.Count > 0 ? Mathf.Max(0f, cursor - Theme.UiTheme.RowGap) : 0f;
             ContentHeight = Mathf.Max(flowH, rowsH);
+            // 铺满视口的宿主：滚动范围恒为 0（滚动交给内嵌列表），也就不会再冒出外层滚动条。
+            if (fillHost) ContentHeight = Mathf.Max(vh, 1f);
+
+            // ⚠ 2026-09-13（用户：“Chat 左侧框没有聊天记录”）：内容高度的**落定必须放在 ContentHeight 算完之后再补一次**。
+            //   上面那次 `SetRect(Content, …, ContentHeight)` 用的是**上一轮**的值：
+            //   首次布局 / `ClearRows()`（会把 ContentHeight 归零）之后，它写下去的是 **0 高**，
+            //   而 `RectMask2D` 会把 0 高内容区整片裁掉 → “列表里有行、Count>0，但一条也看不见”。
+            //   常规页面靠“父尺寸后到”会再排一次盖过去；但**固定尺寸**的宿主（悬浮聊天层）宽度从头到尾不变，
+            //   `MaybeRelayout` 因 `_lastW` 相等而直接 return → 永远不收敛。补这一行即一次收敛。
+            if (_rt != null) Theme.UiTheme.SetRect(Content, 0f, 0f, Mathf.Max(40f, vw - BarW), ContentHeight);
 
             float max = Mathf.Max(0f, ContentHeight - _viewportH);
             _scroll = Mathf.Clamp(_scroll, 0f, max);

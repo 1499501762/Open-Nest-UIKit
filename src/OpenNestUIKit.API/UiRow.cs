@@ -70,6 +70,14 @@ public enum UiRowKind
     /// 用途：列表+详情布局（选一个才能做下一步），比“每行一个按钮”语义清楚。
     /// </summary>
     SelectableList = 16,
+
+    /// <summary>
+    /// **键值行**（`标签 | 值`，只读）：<see cref="Label"/> = 标签列，<see cref="Value"/> = 值列。
+    ///
+    /// 用途：详情/诊断页的“属性表”（状态 / 文件 / 配置 / 版本 / 作者 …）。与 <see cref="Label"/> 的区别：
+    /// 宿主把多行的**标签、值各自对齐成一列**（标签列固定宽 + 值列左对齐），扫读性比“标签：值”一行到底好得多。
+    /// </summary>
+    Info = 17,
 }
 
 /// <summary>
@@ -108,6 +116,11 @@ public sealed class UiRow
     public string PageId { get; set; }
     /// <summary>选项列表（仅 <see cref="UiRowKind.Choice"/>）。</summary>
     public IReadOnlyList<string> Choices { get; set; }
+    /// <summary>
+    /// 内嵌列表每行的**右对齐副文本**（与 <see cref="Choices"/> 一一对应；`List`/`SelectableList` 用）。
+    /// 信息型列表的标准排版：左边主文本（超长省略）+ 右边版本/状态**对齐成一列**。
+    /// </summary>
+    public IReadOnlyList<string> ListHints { get; set; }
     /// <summary>数值范围（仅 <see cref="UiRowKind.Slider"/> 与 <see cref="UiRowKind.Progress"/>）。</summary>
     public double Min { get; set; }
     public double Max { get; set; } = 1;

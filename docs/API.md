@@ -29,6 +29,8 @@ menu — drawn with the game's native widget set — without linking to the mod 
 | `UiKitHost.PageChanged` (page shown/hidden) | ✅ implemented — fired on open, navigate, back and close |
 | Dialog (`Confirm` / `CanShowDialog`) | ✅ implemented — native modal, ESC = cancel |
 | Scrolling (`ScrollToKey` / `ScrollToTop`) | ✅ implemented for declarative pages (a row is only moved when it is not already visible) |
+| List side text (`SelectableList` overload with `hints`) | ✅ implemented — an optional **right-aligned** side text per row (versions/status line up in one column); both main and side text are single-line ellipsised |
+| Footer info (`SetFooter`) | ✅ implemented — a persistent line at the right of the host footer; shares the slot with the host's temporary status message (the message wins, the footer returns after it expires). Use it for environment/version/summary text instead of spending page rows on it |
 | Localisation (`UiKitLang.T` / `IsChinese` / `Changed`) | ✅ implemented — the host pushes the game language |
 | Optional `IUiKitDefaults` (reset button) | ✅ implemented — the host appends a confirmed "Reset to defaults" row to your root page |
 | Chat overlay (`SetChat` / `ClearChat` / `FocusChat` / `CloseChat` / `CanShowChat` / `IsChatTyping`) | ✅ implemented — one floating panel per host, driven by your line/en send callbacks |
@@ -194,6 +196,7 @@ All verbs are chainable and return the same `UiPageDef`.
 |---|---|
 | `Header(string text)` | group title |
 | `Label(string text)` | plain text |
+| `Info(string label, string value)` | key/value row: fixed-width label column + left-aligned value column (aligned table, ideal for detail/diagnostics pages) |
 | `Separator()` | divider line |
 | `Button(string label, string buttonText, Action onClick)` | label + button |
 | `Nav(string label, string pageId, string hint = null)` | submenu entry |
@@ -208,8 +211,13 @@ All verbs are chainable and return the same `UiPageDef`.
 | `Progress(string label, double value01)` | read-only progress bar (clamped to 0..1) |
 | `Foldout(string key, string label, bool expanded, Action<bool> onToggle, Action<UiPageDef> body)` | collapsible group (▾ when open, ▶ when closed) |
 | `SelectableList(string key, float height, IReadOnlyList<string> items, int selected, Action<int> onSelected)` | scrolling list with one highlighted row |
+| `SelectableList(string key, float height, IReadOnlyList<string> items, IReadOnlyList<string> hints, int selected, Action<int> onSelected)` | same, plus right-aligned per-row side text (version/status aligned in one column) |
 | `Columns(float leftWidth, Action<UiPageDef> left, Action<UiPageDef> right, float gap = 12f)` | two columns, see §5 |
 | `List(string key, float height, Action<UiPageDef> build)` | scrolling sub-list, see §5 |
+
+> `height < 0` (for `List`/`SelectableList`) means **grow to the remaining height** — the desktop-style
+> two-pane layout: use `-1f` for the list inside a `Columns` pane so both panes scroll internally and the
+> page itself never grows a scrollbar.
 
 **Row modifiers** (they apply to the row you added last, so put them right after it):
 

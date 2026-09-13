@@ -63,6 +63,13 @@ public sealed class UiText : UiWidget
         set { try { if (_txt != null) _txt.alignment = value; } catch { } }
     }
 
+    /// <summary>字距（工业风的标题/分组名拉开一点看着更“制式”；0 = 默认）。</summary>
+    public float LetterSpacing
+    {
+        get { try { return _txt != null ? _txt.characterSpacing : 0f; } catch { return 0f; } }
+        set { try { if (_txt != null) _txt.characterSpacing = value; } catch { } }
+    }
+
     /// <summary>创建文本。</summary>
     public static UiText Create(Transform parent, string text, UiTextKind kind = UiTextKind.Body,
         float width = 0f, TextAlignmentOptions? align = null)

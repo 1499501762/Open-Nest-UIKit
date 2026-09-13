@@ -166,6 +166,26 @@ public sealed class UiButton : UiWidget
     public void SetSprite(Sprite sprite)
         => SetSpriteRef(UiSpriteRef.From(sprite));
 
+    /// <summary>
+    /// **运行期改尺寸**（标题栏的“返回/关闭”两态切换、图标按钮等用）。
+    /// 除了改矩形，还要写回 `_width/_height`（<see cref="Layout.UiMeasure"/> 量尺寸读的就是它们）
+    /// 并按新尺寸重挑素材 —— 所以这里用 `new` 盖掉基类那个“只改矩形”的版本。
+    /// </summary>
+    public new void SetSize(float w, float h = 0f)
+    {
+        try
+        {
+            if (w > 0f) _width = w;
+            if (h > 0f) _height = h;
+            base.SetSize(_width > 0f ? _width : 120f, _height);
+            RefitSprite();
+        }
+        catch { }
+    }
+
+    /// <summary>当前宽高（诊断/测试用）。</summary>
+    public Vector2 Size => new Vector2(_width, _height);
+
     /// <summary>换素材引用（携带绘制模式/是否填中心；切片工具预览用）。</summary>
     public void SetSpriteRef(UiSpriteRef r)
     {
@@ -242,6 +262,16 @@ public sealed class UiButton : UiWidget
         var r = UiSurface.ButtonRefFor(style, width > 0f ? width : 120f, h);
         var baseColor = color ?? DefaultColor(style);
         var fill = UiSurface.Build(rt, baseColor, r);
+
+        // 扁平工业风：按钮也要有一圈 **1px 描边**（与窗口/面板同一套线），否则一块纯色块看着没“壳”。
+        // 主/危险按钮用各自的强调色描边（琥珀/红），次按钮用冷灰 Border。
+        if (style != UiButtonStyle.Ghost)
+        {
+            Color edge = style == UiButtonStyle.Primary ? Theme.UiTheme.Alpha(Theme.UiTheme.Accent, 0.55f)
+                       : style == UiButtonStyle.Danger ? Theme.UiTheme.Alpha(Theme.UiTheme.Err, 0.55f)
+                       : Theme.UiTheme.Border;
+            Theme.ModStyle.Outline(rt, edge, Theme.UiTheme.OutlineW);
+        }
 
         var txt = UiText.Create(rt, text, UiTextKind.Body, 0f, TextAlignmentOptions.Center);
         txt.Rect.offsetMin = Vector2.zero;

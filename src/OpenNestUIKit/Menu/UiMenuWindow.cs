@@ -28,6 +28,8 @@ public static class UiMenuWindow
     private static RectTransform _footer;
     private static Widgets.UiText _crumb;
     private static Widgets.UiText _status;
+    /// <summary>底栏右侧的**常驻**信息（第三方用 `UiKitHost.SetFooter` 设；与临时提示共用同一位置，提示优先）。</summary>
+    private static string _footerInfo = "";
     private static Widgets.UiButton _backBtn;
     private static readonly UiPageStack _stack = new();
     private static readonly System.Collections.Generic.Dictionary<string, RectTransform> _hosts = new();
@@ -296,7 +298,26 @@ public static class UiMenuWindow
     {
         _statusText = text ?? "";
         _statusUntil = _clock + 6f;
-        try { if (_status != null) _status.Value = _statusText; } catch { }
+        RefreshFooter();
+    }
+
+    /// <summary>
+    /// 底栏右侧的**常驻**信息（第三方：<c>UiKitHost.SetFooter</c>）。与 <see cref="SetStatus"/> 的临时提示
+    /// **共用同一位置**：有提示时显示提示，提示过期后回落到底栏信息。
+    ///
+    /// 用途（ModMenu 2026-09-13）：把“宿主 / UIKit 版本 / 提供者统计”这类摘要摆到底栏，
+    /// 不再作为**页面行**占高度（那样会把页面撑出窗口）。
+    /// </summary>
+    public static void SetFooter(string text)
+    {
+        _footerInfo = text ?? "";
+        RefreshFooter();
+    }
+
+    /// <summary>底栏右侧文本 = 临时提示优先，否则常驻底栏信息。</summary>
+    private static void RefreshFooter()
+    {
+        try { if (_status != null) _status.Value = _statusText.Length > 0 ? _statusText : _footerInfo; } catch { }
     }
 
     // ---------------- 每帧 ----------------
@@ -448,7 +469,7 @@ public static class UiMenuWindow
             if (_statusText.Length > 0 && _clock >= _statusUntil)
             {
                 _statusText = "";
-                try { if (_status != null) _status.Value = ""; } catch { }
+                RefreshFooter();      // 回落到底栏常驻信息（没有就清空）
             }
         }
         catch { }
@@ -479,17 +500,23 @@ public static class UiMenuWindow
             // 背板（压暗 + 拦截射线）
             UI.UiKit.MakeBlocker(_canvas.transform, Theme.UiTheme.Backdrop);
 
-            _window = Widgets.UiWindow.Create(_canvas.transform, UiKitInfo.Name, Close);
+            // ⚠ 2026-09-13（用户：“两个菜单右上角的 Close 和右上角的 X 只留一个就行了”）：
+            //   关闭**只留一个** —— 交给下面的「返回/关闭」按钮（栈底时它就是关闭）。
+            //   所以窗口**不再建自带的 X**（`onClose = null`；`UiWindow` 那边会相应把标题框拉宽）。
+            _window = Widgets.UiWindow.Create(_canvas.transform, UiKitInfo.Name, null);
             if (_window == null) { CoopLog.Error("uikit.ui", () => "窗口创建失败"); return; }
 
-            // 返回按钮（标题栏左侧，关闭按钮左边）
-            _backBtn = Widgets.UiButton.Create(_window.Header, "< " + UiKitLoc.T("返回", "Back"), Back,
-                Widgets.UiButtonStyle.Secondary, 90f, 30f);
+            // 返回/关闭按钮（标题栏最右）：**栈底 = 关闭（图标 ×，紧凑方形）/ 有上级页 = 文字「< 返回」**
+            // ⚠ 用户 2026-09-13：“右上角 Close 文本改成 ×，样式改好看点” —— 两态共用一个按钮（宽度随态变），
+            //   文字与宽度统一由 <see cref="RefreshHeaderButton"/> 维护（含标题内缩避让）。
+            _backBtn = Widgets.UiButton.Create(_window.Header, "×", Back,
+                Widgets.UiButtonStyle.Secondary, 28f, 26f, color: Theme.UiTheme.HeaderBg, zoneName: "btn:headerclose");
             try
             {
                 _backBtn.Rect.anchorMin = _backBtn.Rect.anchorMax = new Vector2(1f, 0.5f);
                 _backBtn.Rect.pivot = new Vector2(1f, 0.5f);
-                _backBtn.Rect.anchoredPosition = new Vector2(-54f, 0f);
+                _backBtn.Rect.anchoredPosition = new Vector2(-12f, 0f);
+                if (_backBtn.Text != null) { _backBtn.Text.FontSize = 16f; }   // 图标字形比正文大一号才不显得空
             }
             catch { }
 
@@ -518,6 +545,10 @@ public static class UiMenuWindow
             }
             catch { }
 
+            // 扁平工业风底栏：**实底 + 顶部发丝线**（状态栏那种“一块钢板”的观感，不靠渐变）。
+            Theme.ModStyle.Fill(_footer, "bg", Theme.UiTheme.FooterBg);
+            Theme.ModStyle.TopRule(_footer, Theme.UiTheme.Hairline);
+
             _crumb = Widgets.UiText.Create(_footer, "", Widgets.UiTextKind.Note, 0f, TextAlignmentOptions.MidlineLeft);
             try
             {
@@ -526,6 +557,7 @@ public static class UiMenuWindow
                 _crumb.Rect.pivot = new Vector2(0f, 0.5f);
                 _crumb.Rect.offsetMin = Vector2.zero;
                 _crumb.Rect.offsetMax = Vector2.zero;
+                _crumb.SetSingleLine(true);              // ⚠ 底栏是一行：多行会把文字溢出面板（实测三者宿主摘要）
             }
             catch { }
 
@@ -537,6 +569,7 @@ public static class UiMenuWindow
                 _status.Rect.pivot = new Vector2(1f, 0.5f);
                 _status.Rect.offsetMin = Vector2.zero;
                 _status.Rect.offsetMax = Vector2.zero;
+                _status.SetSingleLine(true);             // 同上：常驻摘要/状态提示都只能占一行（超长省略）
             }
             catch { }
 
@@ -666,10 +699,28 @@ public static class UiMenuWindow
             }
             if (_backBtn != null)
             {
-                bool show = _stack.CanGoBack;
-                _backBtn.Visible = true;    // 始终显示（栈底点击 = 关闭），文案随深度变化
-                _backBtn.SetText(show ? "< " + UiKitLoc.T("返回", "Back") : UiKitLoc.T("关闭", "Close"));
+                RefreshHeaderButton();
             }
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// 标题栏右侧那颗按钮的两态：栈底 = **关闭（图标 ×，紧凑方形）**；有上级页 = **文字「&lt; 返回」**。
+    /// 宽度、文案、标题避让三件事都在这里统一改（否则会出现“标题压在按钮下面”）。
+    /// </summary>
+    private static void RefreshHeaderButton()
+    {
+        try
+        {
+            if (_backBtn == null) return;
+            bool canBack = _stack.CanGoBack;
+            float w = canBack ? 84f : 28f;
+            _backBtn.Visible = true;                       // 始终显示（栈底点击 = 关闭）
+            _backBtn.SetSize(w, 26f);
+            _backBtn.SetText(canBack ? "< " + UiKitLoc.T("返回", "Back") : "×");
+            if (_window != null && _window.Title != null)
+                _window.Title.Rect.offsetMax = new Vector2(-(w + 20f), 0f);
         }
         catch { }
     }

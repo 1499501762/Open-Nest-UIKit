@@ -43,9 +43,20 @@ public static class UiTextRouter
     private static UnityEngine.InputSystem.Keyboard _kb;
     private static float _backspaceAt = -1f, _lastRepeatAt;
     private static float _focusAt;
-    private static string _lastNative = "";      // 最近一次原生 IME 提交（去重用）
+    /// <summary>最近一次“真实打字活动”（物理键 / OnTextInput）发生在哪一帧（诊断用）。</summary>
+    private static int _activityFrame = -1;
+    /// <summary>上一帧是否在组合中（用于识别“组合刚结束”这个事件）。</summary>
+    private static bool _wasComposing;
+    /// <summary>组合刚结束 ⇒ 下一次“同一条原生串”也算新提交（否则同一条就是持值，必须跳过）。</summary>
+    private static bool _imeCommitFresh;
+
+    /// <summary>最近一次原生 IME 提交（**跨聚焦持久的去重键**：`GCS_RESULTSTR` 是持值的，绝不能随聚焦清空）。</summary>
+    private static string _lastNative = "";
+    /// <summary>最近一次**含 CJK** 的原生提交发生在哪一帧（同一帧内 OnTextInput 通道不再重复追加）。</summary>
+    private static int _nativeCjkFrame = -1;
     private static string _compositionLast = "";  // 上次组合文本（组合确认时追加；补 OnTextInput 收不到确认字符）
     private static bool _composing;
+
     private static int _diag;
 
     // ---- 首字母缓冲 / 快模式（照搬原模组 CoopUIManager.ProcessKeyChar/ProcessPendingChar）----
@@ -87,7 +98,8 @@ public static class UiTextRouter
         if (box != null)
         {
             _focusAt = Time.realtimeSinceStartup;
-            _lastNative = "";
+            // ⚠ 不再清 `_lastNative`：`GCS_RESULTSTR` 是**持值**的，清掉去重键会让“上一次的提交串”在重新聚焦时
+            //   被当作新提交又补进空框（用户：“旧文本回填还是在”）。组合缓存与缓冲仍清（它们确实应属于上一次编辑）。
             _compositionLast = "";
             _backspaceAt = -1f;
             _pendingChar = (char)0;
@@ -102,6 +114,17 @@ public static class UiTextRouter
         {
             DeactivateImeAnchor();
             try { Native.UiInputGuard.SetTextCapture(false); } catch { }
+            // ⚠ 2026-09-13（用户：“中文输入之后按回车发送之后又唤起输入了、上一条输入的信息还在”）：
+            //   失焦时必须**清掉组合缓存与首字母缓冲**。否则下次聚焦时“组合结束”那条兜底会把
+            //   **上一次的文本**当成新提交补进空框 —— 看着就是“发送/清空之后旧内容又回来了”，
+            //   而且因为框里又有字，接着回车就会把同一条消息再发一遍。
+            //   ⚠ `_lastNative` **不清**（它是 `GCS_RESULTSTR` 持值的去重键，清了反而会回填）。
+            _compositionLast = "";
+            _composing = false;
+            _wasComposing = false;
+            _pendingChar = (char)0;
+            _pendingFrames = 0;
+            _fastMode = false;
         }
     }
 
@@ -174,6 +197,7 @@ public static class UiTextRouter
                 Diag = "无聚焦";
                 return;
             }
+            TickImeContext();     // 聚焦后延迟复查“IME 上下文是否真的关联上”（切不了中文的根因）
             if (!box.Alive) { Diag = "框已销毁"; SetFocused(null); return; }
 
             var kb = UnityEngine.InputSystem.Keyboard.current;
@@ -184,6 +208,10 @@ public static class UiTextRouter
             // ① 组合中（拼音候选窗打开）：**跳过所有物理键** —— 字母/数字/空格/退格/回车都是输入法在用的
             //    （用原生 GCS_COMPSTR 判定，比 Unity 的 compositionString 更及时 → 首字母不会漏进框）。
             _composing = IsComposing();
+            // ⚠ 组合中也算“正在打字”（这是判断“同段文本是另一通道的重复、还是新提交”的关键活动信号）：
+            //   某些输入法（实测本机）拿不到 compositionString，只有原生 GCS_COMPSTR 为真 —— 不在这里记活动，
+            //   就会把用户新打的词误判成“刚追加过的同一段文本”而丢掉（实测日志：`'中文'/'英文'` 被误跳过）。
+            if (_composing) _activityFrame = Time.frameCount;
 
             // 回车/ESC 本帧状态（由 ReadFrameKeys 统一给出：物理上升沿 / 单帧脉冲 / 文本通道 \r）
             bool enter = EnterThisFrame, esc = EscThisFrame;
@@ -222,7 +250,7 @@ public static class UiTextRouter
             // ⑤ 物理键（英文/数字/符号）——先缓冲再看（避免拼音首字母漏进输入框）
             bool shift = false;
             try { shift = kb.leftShiftKey.isPressed || kb.rightShiftKey.isPressed; } catch { }
-            if (TryReadChar(kb, shift, out char ch)) { Diag = "物理键字符"; ProcessKeyChar(box, ch); }
+            if (TryReadChar(kb, shift, out char ch)) { Diag = "物理键字符"; _activityFrame = Time.frameCount; ProcessKeyChar(box, ch); }
             else Diag = "空闲";
         }
         catch (Exception ex) { Diag = "异常: " + ex.Message; }
@@ -343,9 +371,19 @@ public static class UiTextRouter
     public static void Submit(UiTextInput box)
     {
         if (box == null) return;
+        LastSubmitAt = Time.realtimeSinceStartup;      // 悬浮聊天层的“回车唤入”靠它做冷却（防同一次回车把它又弹开）
+        // 提交后同样要把 IME 缓存清干净（否则旧文本会在下次聚焦时被“组合结束”兜底补回来）
+        _compositionLast = "";
+        _composing = false;
+        _wasComposing = false;
+        _pendingChar = (char)0;
+        _pendingFrames = 0;
         try { box.RaiseSubmit(); } catch { }
         SetFocused(null);
     }
+
+    /// <summary>最近一次回车提交的时间（<see cref="Time.realtimeSinceStartup"/>；没提交过 = -999）。</summary>
+    public static float LastSubmitAt { get; private set; } = -999f;
 
     /// <summary>
     /// Harmony patch `Keyboard.OnTextInput` 的入口（见 <see cref="Install"/>）：
@@ -369,8 +407,17 @@ public static class UiTextRouter
             if (c == '\b') return;
             if (c <= 0x2E7F) return;                 // 只收 CJK（英文走物理键）
             if (c == '\uFFFD') return;               // IL2CPP 交互层把 CJK 破坏成的替换码（原模组 SanitizeIme 同款）
+            // ⚠ 同一个字可能**两个通道都送到**（原生 GCS_RESULTSTR + 本 patch）：
+            //   同一帧内原生刚追加过 CJK → 这里不再追加，否则一次输入会出现“中文中文”。
+            if (_nativeCjkFrame == Time.frameCount) return;
+            // 反向去重：原生通道刚追加过整段文本（属同一提交）→ 逐字通道不再补一遍
+            string one = c.ToString();
+            if (RecentlyAppended(one)) return;
+            _activityFrame = Time.frameCount;          // 真实打字活动
+            _lastAppendedText = one;                   // 逐字通道也纳入“最近追加”（供反向判重）
+            _lastAppendedFrame = Time.frameCount;
             Append(box, c);
-            if ((++_diag % 20) == 1) CoopLog.Debug("uikit.widget", () => $"OnTextInput CJK '{c}' U+{(int)c:X4}");
+            if ((++_diag % 10) == 1) CoopLog.Info("uikit.widget", () => $"IME OnTextInput CJK '{c}' U+{(int)c:X4}");
         }
         catch { }
     }
@@ -448,8 +495,28 @@ public static class UiTextRouter
         return sb.ToString();
     }
 
+    /// <summary>串里有没有 CJK（用来区分“输入法已转换的真提交”与“还在组合的拼音”）。</summary>
+    private static bool HasCjk(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return false;
+        for (int i = 0; i < s.Length; i++)
+        {
+            char ch = s[i];
+            if (ch >= 0x2E80 && ch <= 0x9FFF) return true;      // CJK 部首/汉字
+            if (ch >= 0x3040 && ch <= 0x30FF) return true;      // 假名（日文输入）
+            if (ch >= 0xAC00 && ch <= 0xD7AF) return true;      // 谚文（韩文输入）
+        }
+        return false;
+    }
+
     /// <summary>
-    /// 读一帧的原生 IME 状态：① 提交串（GCS_RESULTSTR）→ 追加；② 组合确认（compositionString 消失那一刻）→ 追加。
+    /// 读一帧的原生 IME 状态。两条通道，**谁给的才算数看内容**：
+    /// ① `GCS_RESULTSTR`（<paramref name="box"/> 侧的 native）：**只有含 CJK 才追加**。
+    ///    实测在某些输入法/Unity 组合下它给的是**未转换的拼音**（`zhong'wen`）——直接追加就是那条拼音尾巴。
+    /// ② 组合串在组合结束那一刻（cached）：**它才是转换后的汉字**。
+    ///    ⚠ 2026-09-13 事故“中文输入切不了了”：上一版用“本次组合是否已收到原生提交”把这条路挡掉了，
+    ///    而在“原生串=拼音”的输入法下，那等于把**唯一能送汉字的通道**关死 —— 所以那条前置条件已删除。
+    /// 两条路的判据统一为：**必须含 CJK + 不与现有文本重复**，纯拉丁串一律不进框。
     /// 返回 true = 本帧已消费（调用方跳过物理键，避免同一拍重复）。
     /// </summary>
     private static bool PollNativeIme(UiTextInput box)
@@ -457,31 +524,69 @@ public static class UiTextRouter
         bool handled = false;
         try
         {
+            // ① 原生结果串（**本输入法的主要通道**：实测日志里汉字都是 `IME 原生提交 added='…'` 进来的，
+            //    连组合结束那条路都没走过 —— 所以这里**必须无条件读**，不能加“组合窗口/打字活动”之类的门，
+            //    否则他们的输入法又会“进不了中文”）。
+            //    ⚠ 用**持久去重键** `_lastNative` 防回填：`ImmGetCompositionStringW(GCS_RESULTSTR)` 是**持值**的，
+            //    上一次提交的串会一直被返回；旧版在聚焦时把它清空 ⇒ 重新聚焦第一帧就把它当新提交又补进空框
+            //    （用户：“旧文本回填还是在”）。所以：**永远不清 `_lastNative`**，同一条只追加一次。
             string native = SanitizeIme(ReadImeCommitted());
-            if (!string.IsNullOrEmpty(native) && native != _lastNative)
+            if (!string.IsNullOrEmpty(native))
             {
-                _lastNative = native;
-                Append(box, native);
-                if ((++_diag % 10) == 1) CoopLog.Debug("uikit.widget", () => $"原生中文提交 added='{native}'");
-                handled = true;
+                // “同一条串”什么时候算真提交？—— 只有**在这之后又观察到过一次组合结束**（= 用户真的又打了一次词）
+                // 才算。否则就是 `GCS_RESULTSTR` 的持值（重新聚焦/输入中都会一直返回上一条）⇒ 必须跳过。
+                bool held = native == _lastNative && !_imeCommitFresh;
+                if (held)
+                {
+                    if ((++_diag % 40) == 1) CoopLog.Info("uikit.widget", () => $"IME 原生串与上一条相同（持值）→ 跳过：'{native}'");
+                }
+                else
+                {
+                    _lastNative = native;
+                    _imeCommitFresh = false;
+                    if (ShouldAppendNative(native))
+                    {
+                        _nativeCjkFrame = Time.frameCount;    // 逐字通道在同一帧内不再重复追加
+                        // ⚠ 同一段文本可能刚被**逐字通道/组合通道**送过（隔几帧）⇒ 按“框尾 + 短窗口”拦一道
+                        if (RecentlyAppended(native))
+                        {
+                            CoopLog.Info("uikit.widget", () => $"IME 跨通道去重：原生串 '{native}' 刚被其他通道追加过 → 跳过");
+                        }
+                        else if (AppendIme(box, native)) handled = true;
+                        if ((++_diag % 10) == 1) CoopLog.Info("uikit.widget", () => $"IME 原生提交 '{native}'");
+                    }
+                    else if ((++_diag % 20) == 1)
+                    {
+                        CoopLog.Info("uikit.widget", () => $"IME 原生串是纯拉丁（未转换的拼音）→ 不追加：'{native}'");
+                    }
+                }
             }
 
-            // 组合文本 → 组合结束（变空）时把最后一段组合追加进去（补 OnTextInput 收不到确认字符的通道）
+            // ② 组合串（有些输入法走这条）：观察到非空就缓存，掉到空那一帧追加（含 CJK 才追加）
             string comp = "";
-            try { comp = _anchor?.compositionString ?? ""; } catch { comp = ""; }
-            if (comp.Length > 0)
+            try { comp = FakeComposition ?? (_anchor?.compositionString ?? ""); } catch { comp = ""; }
+            if (FakeComposition != null) FakeComposition = null;      // 测试钩子：只活一帧（下一帧它就“结束”了）
+            bool composingNow = comp.Length > 0 || _composing;
+            if (composingNow)
             {
-                _compositionLast = comp;
+                _wasComposing = true;
+                _activityFrame = Time.frameCount;      // 组合中 = 正在打字（算新活动）
+                if (comp.Length > 0) _compositionLast = comp;
             }
-            else if (_compositionLast.Length > 0)
+            else
             {
-                string cached = SanitizeIme(_compositionLast);
-                _compositionLast = "";
-                string cur = box.Value ?? "";
-                if (cached.Length > 0 && !cur.EndsWith(cached, StringComparison.Ordinal) && cur != _lastNative)
+                if (_wasComposing) { _wasComposing = false; _imeCommitFresh = true; }   // 组合刚结束 = 下一次提交算“新”
+                if (_compositionLast.Length > 0)
                 {
-                    Append(box, cached);
-                    handled = true;
+                    string cached = SanitizeIme(_compositionLast);
+                    _compositionLast = "";
+                    string cur = box.Value ?? "";
+                    if (ShouldAppendComposition(cached, cur))
+                    {
+                        if (AppendIme(box, cached)) handled = true;
+                        _imeCommitFresh = false;
+                        if ((++_diag % 10) == 1) CoopLog.Info("uikit.widget", () => $"IME 组合结束提交 '{cached}'");
+                    }
                 }
             }
         }
@@ -489,7 +594,92 @@ public static class UiTextRouter
         return handled;
     }
 
-    private static string ReadImeCommitted() => ReadImeString(GCS_RESULTSTR);
+    private static string ReadImeCommitted()
+        => FakeImeResult ?? ReadImeString(GCS_RESULTSTR);
+
+    /// <summary>
+    /// **测试钩子**：非 null 时冒充 `GCS_RESULTSTR` 的返回值（测试模组 `imefake:<文本>` / `imefake` 清除）。
+    /// 用途：真实输入法没法自动化，而“持值串回填”这个 bug 的关键就是**同一条串会被反复返回** —— 用它才能稳定复现/回归。
+    /// </summary>
+    public static string FakeImeResult;
+
+    /// <summary>
+    /// **测试钩子**：非 null 时冒充**一帧**的 `compositionString`（下一帧它消失 ⇒ 触发“组合结束”那条通道）。
+    /// 用途：回归“同一次提交被两条通道各送一次”的重复问题（`imecomp:<文本>`）。
+    /// </summary>
+    public static string FakeComposition;
+
+    /// <summary>去重窗口内的“最近一次追加”（跨通道；见 <see cref="RecentlyAppended"/>）。</summary>
+    private static string _lastAppendedText = "";
+    private static int _lastAppendedFrame = -1;
+
+    /// <summary>
+    /// 这是不是**刚刚从另一条通道追加过的同一段文本**？
+    ///
+    /// ⚠ 2026-09-13（用户：“第一次出现的候选词会重复一遍，比如 '中文' 变 '中文中文'，第二次再打就不会”）：
+    ///   一次提交可能被**两条通道**分别送来（原生 `GCS_RESULTSTR` / 逐字 `OnTextInput` / 组合结束缓存），两者隔几帧。
+    ///   判据用“最近一次追加发生在最近 <paramref name="frames"/> 帧内，且**当前框尾就是这段文本**”——
+    ///   这样：① 反向顺序（逐字先到、原生后到）也能拦；② 人手不可能在几帧内完成两次不同提交，所以**不会误拦新输入**
+    ///  （早先用“同一会话内同文本只一次”的写法就会误伤：实测日志里 `'中午呢'/'英文'` 被当成重复跳过了）。
+    /// </summary>
+    private static bool RecentlyAppended(string text, int frames = 120)
+    {
+        if (string.IsNullOrEmpty(text)) return false;
+        if (_lastAppendedFrame < 0) return false;
+        if (Time.frameCount - _lastAppendedFrame > frames) return false;     // 上限（防止隔很久的巧合）
+        // ★ 关键：**期间只要有过新的打字活动**（组合开始 / 物理键 / 逐字通道），就说明这是**新提交**，不该拦。
+        //   而“同一次提交从另一条通道又送来一次”不会有任何新活动 ⇒ 这一条就精确区分了两种情况。
+        if (_activityFrame > _lastAppendedFrame) return false;
+        string cur = "";
+        try { cur = Focused != null ? (Focused.Value ?? "") : ""; } catch { }
+        return cur.EndsWith(text, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// 追加一次 IME 文本（记下“最近追加”，供 <see cref="RecentlyAppended"/> 判重）。
+    /// </summary>
+    private static bool AppendIme(UiTextInput box, string text)
+    {
+        if (box == null || string.IsNullOrEmpty(text)) return false;
+        _lastAppendedText = text;
+        _lastAppendedFrame = Time.frameCount;
+        Append(box, text);
+        return true;
+    }
+
+    /// <summary>
+    /// **原生提交串该不该追加**：只认含 CJK 的（= 转换后的汉字）。
+    /// 纯拉丁（拼音/组合串）不追加 —— 这是“中文zhong'wen”那条拼音尾巴的直接修法。
+    /// </summary>
+    internal static bool ShouldAppendNative(string native)
+        => !string.IsNullOrEmpty(native) && HasCjk(native);
+    /// <summary>
+    /// **组合结束时的缓存串该不该追加**：含 CJK + 与现有文本不重复。
+    /// ⚠ 别再加“本次组合是否已收到原生提交”这类前置条件：在“原生串=拼音”的输入法下，
+    ///    加了它会把**唯一能送汉字的通道**挡死（2026-09-13 事故“中文输入切不了了”）。
+    /// ⚠ 也不再比对 `lastNative`（它现在**跨聚焦持久**，会把“同一个词连打两次”误判成重复）。
+    /// </summary>
+    internal static bool ShouldAppendComposition(string cached, string current)
+    {
+        if (string.IsNullOrEmpty(cached) || !HasCjk(cached)) return false;
+        string cur = current ?? "";
+        if (cur.EndsWith(cached, StringComparison.Ordinal)) return false;      // 已经有这段了
+        return true;
+    }
+
+    /// <summary>
+    /// 把两条通道的决策一次算出来（测试模组 `imedecide` 命令用）——
+    /// **不靠真输入法也能回归这套规则**（本机没法自动化中文输入，这是唯一可离线验证的抓手）。
+    /// </summary>
+    public static string ImeDecision(string native, string cached, string current, string lastNative)
+    {
+        string n = string.IsNullOrEmpty(native) ? "-"
+                 : (ShouldAppendNative(native) ? "append" : "skip(无CJK=拼音)");
+        string c = string.IsNullOrEmpty(cached) ? "-"
+                 : (ShouldAppendComposition(cached, current) ? "append" : "skip(无CJK或已重复)");
+        return $"native={n}, cached={c}  |  native='{native}' hasCjk={(!string.IsNullOrEmpty(native) && HasCjk(native))}"
+             + $", cached='{cached}' hasCjk={(!string.IsNullOrEmpty(cached) && HasCjk(cached))}, cur='{current}'";
+    }
 
     // ---------------- 隐藏 IME 锚点 ----------------
 
@@ -576,12 +766,35 @@ public static class UiTextRouter
                     try { _anchor.ActivateInputField(); } catch { }
                 }
             }
+
+            // ⚠ 2026-09-13（用户：“系统的输入法在打开输入框的时候切换不了中文输入模式，只能在英文输入模式”）：
+            //   真因：Unity 只在 **TMP_InputField 真正拿到焦点**时（`ActivateInputFieldInternal`）才把
+            //   `Input.imeCompositionMode` 置为 `On`。而我们的窗口在**自己的画布**上、游戏 EventSystem 常常是
+            //   禁用的 ⇒ 焦点没真正生效 ⇒ 组合模式停在游戏设的 `Off` ⇒ **系统输入法锁在英文/直接输入模式，
+            //   切不到中文**（不是提交逻辑的问题）。这里**显式打开**，并在失焦时恢复。
+            //   ⚠ 该类型在当前 IL2CPP interop 里没暴露（直接写 `UnityEngine.IMECompositionMode` 编译不过），
+            //   但游戏里确实有（见 `tools/dump_inputlegacy.txt`）⇒ 用**反射**做到“有就设、没有就跳过”。
+            if (!_imeModeSaved)
+            {
+                _imeModeBefore = TryImeMode(null);
+                _imeModeSaved = true;
+            }
+            TryImeMode("On");
+
             var kb = UnityEngine.InputSystem.Keyboard.current;
             if (kb != null)
             {
                 try { kb.SetIMEEnabled(true); } catch { }
                 try { kb.SetIMECursorPosition(ImeCursorPos()); } catch { }
             }
+
+            // 最后一道保险：上下文被 Unity 摘掉时（组合模式 Off 时 Unity 会 `ImmAssociateContext(hwnd, 0)`），
+            // `ImmGetContext` 会返回 0 —— 那样**任何中文都不可能进来**（也切不了中文）。
+            // ⚠ 不在这里立刻重建：实测把组合模式置为 `On` 后 **Unity 自己会在稍后关联上下文**
+            //   （日志：激活瞬间未关联 → 收起时已是 0x1E160E4D），立刻重建可能跟它抢。所以延到 `ImeContextCheckDelaySec` 后复查。
+            _imeContextCheckAt = Time.unscaledTime + ImeContextCheckDelaySec;
+            if ((++_imeLog % 3) == 0)
+                CoopLog.Info("uikit.widget", () => "IME 激活：" + ImeState());
         }
         catch (Exception ex) { CoopLog.Warn("uikit.widget", () => "激活 IME 失败：" + ex.Message); }
     }
@@ -597,8 +810,130 @@ public static class UiTextRouter
                 if (_anchor.isFocused) { try { _anchor.DeactivateInputField(); } catch { } }
                 try { _anchor.text = ""; } catch { }
             }
+            // 恢复进入输入框之前的组合模式（不要把游戏的状态改成我们的）
+            if (_imeModeSaved)
+            {
+                TryImeMode(_imeModeBefore);
+                _imeModeSaved = false;
+            }
+            if ((++_imeLog % 3) == 0)
+                CoopLog.Info("uikit.widget", () => "IME 收起：" + ImeState());
         }
         catch { }
+    }
+
+    /// <summary>进入输入框之前的 `Input.imeCompositionMode`（名字；失焦时恢复）。空串 = 该类型不可用。</summary>
+    private static string _imeModeBefore = "";
+    private static bool _imeModeSaved;
+    private static int _imeLog;
+
+    /// <summary>
+    /// 读/写 `Input.imeCompositionMode`（**反射**：当前 IL2CPP interop 没暴露 `UnityEngine.IMECompositionMode`，
+    /// 直接写编译不过；而游戏里确实有 —— 见 `tools/dump_inputlegacy.txt`）⇒ 做到“有就设、没有就跳过”。
+    /// <paramref name="set"/> = null 时只读。返回当前/设置后的名字，不可用返回 <c>n/a</c>。
+    /// </summary>
+    public static string TryImeMode(string set)
+    {
+        try
+        {
+            var prop = FindInputType()?.GetProperty("imeCompositionMode",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+            if (prop == null) return "n/a";
+            if (!string.IsNullOrEmpty(set))
+            {
+                var et = prop.PropertyType;
+                object v = et.IsEnum ? Enum.Parse(et, set) : (object)(set == "On");
+                prop.SetValue(null, v);
+            }
+            var cur = prop.GetValue(null);
+            return cur != null ? cur.ToString() : "n/a";
+        }
+        catch { return "n/a"; }
+    }
+
+    private static Type _inputType;
+    private static bool _inputTypeSearched;
+
+    /// <summary>找 `UnityEngine.Input`（按类型名扫已加载程序集；找不到 = 该环境不支持显式组合模式）。</summary>
+    private static Type FindInputType()
+    {
+        if (_inputTypeSearched) return _inputType;
+        _inputTypeSearched = true;
+        try
+        {
+            var asms = AppDomain.CurrentDomain.GetAssemblies();
+            for (int i = 0; i < asms.Length; i++)
+            {
+                try
+                {
+                    var t = asms[i].GetType("UnityEngine.Input", false);
+                    if (t != null) { _inputType = t; break; }
+                }
+                catch { }
+            }
+        }
+        catch { }
+        return _inputType;
+    }
+
+    /// <summary>IME 上下文诊断（hwnd / himc / 组合模式 / 锚点焦点 / EventSystem）—— “切不了中文”就靠这一行定位。</summary>
+    public static string ImeState()
+    {
+        try
+        {
+            string focused = "?", es = "?";
+            try { focused = _anchor != null ? _anchor.isFocused.ToString() : "无锚点"; } catch { }
+            try { es = UnityEngine.EventSystems.EventSystem.current != null
+                    ? (UnityEngine.EventSystems.EventSystem.current.enabled ? "在" : "在但禁用") : "无"; } catch { }
+            long hwnd = 0, himc = 0;
+            try { hwnd = GetActiveWindow().ToInt64(); } catch { }
+            try { var h = hwnd != 0 ? ImmGetContext(new IntPtr(hwnd)) : IntPtr.Zero; himc = h.ToInt64(); if (h != IntPtr.Zero) ImmReleaseContext(new IntPtr(hwnd), h); } catch { }
+            return $"组合模式={TryImeMode(null)}（进入前={(_imeModeSaved && _imeModeBefore.Length > 0 ? _imeModeBefore : "-")}）"
+                 + $"｜锚点焦点={focused}｜EventSystem={es}｜hwnd=0x{hwnd:X}"
+                 + $"｜IME 上下文={(himc == 0 ? "此刻未关联（若刚聚焦：等一下引擎会关联；长时间为 0 则输入法锁在英文）" : "0x" + himc.ToString("X"))}";
+        }
+        catch (Exception ex) { return "IME 状态读取失败：" + ex.Message; }
+    }
+
+    // ---------------- 关联回 IME 上下文（被 Unity 摘掉时用） ----------------
+
+    [System.Runtime.InteropServices.DllImport("imm32.dll")]
+    private static extern IntPtr ImmCreateContext();
+    [System.Runtime.InteropServices.DllImport("imm32.dll")]
+    private static extern IntPtr ImmAssociateContext(IntPtr hwnd, IntPtr himc);
+
+    private static bool _imeContextTried;
+    private static float _imeContextCheckAt = float.MaxValue;
+    /// <summary>置为 `On` 后给 Unity 多少时间自己去关联 IME 上下文（不够我们再兜底）。</summary>
+    private const float ImeContextCheckDelaySec = 0.4f;
+
+    /// <summary>
+    /// 延迟复查 IME 上下文（在 <see cref="Tick"/> 里被调）：`ImmGetContext(hwnd)` = 0 说明该窗口
+    /// **没有 IME 上下文**（系统输入法会被锁在英文/直接模式，中文既切不了也进不来）。
+    /// Unity 在组合模式 = On 时通常会自己关联，所以这里**只当兜底**：延迟到点仍为 0 才自己建一个关联回去。
+    /// </summary>
+    private static void TickImeContext()
+    {
+        if (_imeContextTried || Time.unscaledTime < _imeContextCheckAt) return;
+        _imeContextCheckAt = float.MaxValue;
+        _imeContextTried = true;
+        try
+        {
+            var hwnd = GetActiveWindow();
+            if (hwnd == IntPtr.Zero) return;
+            var cur = ImmGetContext(hwnd);
+            if (cur != IntPtr.Zero)                       // Unity 自己关联上了 → 不用我们插手
+            {
+                ImmReleaseContext(hwnd, cur);
+                CoopLog.Info("uikit.widget", () => "IME 上下文已由引擎关联（正常）");
+                return;
+            }
+            var made = ImmCreateContext();
+            if (made == IntPtr.Zero) { CoopLog.Warn("uikit.widget", () => "IME 上下文未关联且 ImmCreateContext 失败"); return; }
+            var old = ImmAssociateContext(hwnd, made);
+            CoopLog.Info("uikit.widget", () => $"IME 上下文原本未关联 → 已兜底重建并关联（旧=0x{old.ToInt64():X}）");
+        }
+        catch (Exception ex) { CoopLog.Warn("uikit.widget", () => "重建 IME 上下文失败：" + ex.Message); }
     }
 
     /// <summary>候选窗位置 = 当前输入框的屏幕坐标（拿不到时给屏幕中偏上）。</summary>
@@ -664,6 +999,10 @@ public static class UiTextRouter
              + $"｜上一帧停='{Diag}'｜最近回车='{LastEnter}'（{(_lastEnterFrame >= 0 ? (Time.frameCount - _lastEnterFrame).ToString() + " 帧前" : "没按过")}）"
              + $"｜回车本帧={(ConsumedEnter ? "被输入框吃掉" : "-")}"
              + $"｜IME 锚点={anchor}｜键盘={kb}｜最近原生提交='{_lastNative}'"
-             + $"｜patch={( _installed ? "已尝试" : "未装")}";
+             + $"｜patch={( _installed ? "已尝试" : "未装")}"
+             + $"｜组合窗口={( _compositionLast.Length > 0 ? "缓存 " + _compositionLast.Length + " 字" : "-")}"
+             + $"｜打字活动={(_activityFrame >= 0 ? (Time.frameCount - _activityFrame).ToString() + " 帧前" : "-")}"
+             + $"｜原生串来源={(FakeImeResult != null ? "伪造" : "系统IME")}"
+             + $"｜{ImeState()}";      // “切不了中文 / 旧文本回填”就看这几段
     }
 }

@@ -380,6 +380,7 @@ public static class UiInputGuard
         try { hasMs = UnityEngine.InputSystem.Mouse.current != null; } catch { }
         return $"拦截层：游戏输入模块 启用={on} 停用={off} 已毁={dead}"
              + $"｜新输入系统 键盘={hasKb} 鼠标={hasMs}"
+             + $"｜聚焦临时压住射线器={_textRc.Count} 打字中={_textCapture}"
              + $"｜世界点击前缀={(_clickBlockOk ? "已装" : "未装")} 已拦={_blockedClicks}"
              + $"｜原生页压制={_nativePageSuppress} 交互锁={_lockOn}";
     }
@@ -437,6 +438,11 @@ public static class UiInputGuard
                     _esActivatedByUs = false;
                     try { if (_savedEs != null) _savedEs.gameObject.SetActive(_esWasActive); } catch { }
                 }
+                // ⚠ 2026-09-13（用户：“Chat 聚焦在失去聚焦之后就会导致菜单组件都没法接受点击”）：
+                //   以前这里**只还原了输入模块与 EventSystem，漏了 `_textRc`（聚焦期额外压住的射线器）**，
+                //   而 `_textRc` 只增不减 ⇒ 只要聚焦过一次输入框，游戏自己的射线器就**永久 disabled**，
+                //   游戏 UI（含 ESC 菜单里的按钮 / 原生菜单）再也接不到点击。
+                RestoreTextRaycasters();
             }
         }
         catch (Exception ex) { CoopLog.Warn("uikit.ui", () => "SetTextCapture: " + ex.Message); }
@@ -459,6 +465,29 @@ public static class UiInputGuard
             }
         }
         catch { }
+    }
+
+    /// <summary>
+    /// 还原「输入聚焦」期间额外压住的射线器（<see cref="_textRc"/>）并清空记录。
+    ///
+    /// ⚠ 2026-09-13（用户：“Chat 聚焦在失去聚焦之后就会导致菜单组件都没法接受点击”）：
+    ///   `_textRc` 以前**只增不减、从未还原** —— `SetTextCapture(false)` 与 `Restore()` 都漏了它，
+    ///   `EnsureReleasedWhenIdle` 的“残留”判定也没看它。结果：聚焦过一次输入框后，游戏自己的射线器永久失效。
+    /// </summary>
+    private static void RestoreTextRaycasters()
+    {
+        if (_textRc.Count == 0) return;
+        try
+        {
+            for (int i = 0; i < _textRc.Count; i++)
+            {
+                var s = _textRc[i];
+                try { if (s.Rc != null) s.Rc.enabled = s.WasEnabled; } catch { }
+            }
+            CoopLog.Debug("uikit.ui", () => $"输入失焦：已还原聚焦期临时压住的射线器 {_textRc.Count} 个");
+        }
+        catch { }
+        _textRc.Clear();
     }
 
     private static bool IsInList(List<SavedRaycaster> list, GraphicRaycaster r)
@@ -540,6 +569,9 @@ public static class UiInputGuard
         }
         catch { }
         _savedRc.Clear();
+
+        // ②' 聚焦期额外压住的射线器也要放回去（否则游戏 UI 永久失去点击 —— 2026-09-13 修）
+        RestoreTextRaycasters();
 
         try
         {
@@ -658,10 +690,10 @@ public static class UiInputGuard
             if (_textCapture) return;                                     // 打字中（临时放行）—— 由失焦路径还原
             if (Menu.UiMenuWindow.IsOpen) return;                         // 窗口正开着，本来就该拦截
             if (_nativePageSuppress) return;                              // 原生页正开着，是**有意**压着（不是残留）
-            if (_savedModules.Count == 0 && _savedRc.Count == 0 && _orderSaved.Count == 0 && !_lockOn) return;
+            if (_savedModules.Count == 0 && _savedRc.Count == 0 && _orderSaved.Count == 0 && _textRc.Count == 0 && !_lockOn) return;
 
             CoopLog.Warn("uikit.ui", () => "发现拦截层残留（我们已无界面）→ 强制还原："
-                + $"输入模块={_savedModules.Count} 射线器={_savedRc.Count} 层级={_orderSaved.Count} 交互锁={_lockOn}");
+                + $"输入模块={_savedModules.Count} 射线器={_savedRc.Count} 聚焦射线器={_textRc.Count} 层级={_orderSaved.Count} 交互锁={_lockOn}");
             Restore();
         }
         catch { }

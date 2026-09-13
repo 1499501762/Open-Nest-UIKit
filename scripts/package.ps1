@@ -4,14 +4,14 @@
 #   OpenNestUIKit-<ver>-BepInEx.zip       (BepInEx\plugins\OpenNestUIKit.dll + OpenNestUIKit.API.dll)
 #   OpenNestUIKit-<ver>-MelonLoader.zip   (Mods\OpenNestUIKit.MelonMod.dll + UserLibs\OpenNestUIKit.API.dll)
 # 用法: powershell -ExecutionPolicy Bypass -File .\scripts\package.ps1
-#   -Version 0.0.1-Alpha-1
+#   -Version 0.0.1-Alpha-4
 #   -GameDirG "<游戏目录>"   (BepInEx 端构建用，需已装 BepInEx 6 IL2CPP)
 #   -GameDirD "<游戏目录>"   (MelonLoader 端构建用，需已装 MelonLoader 0.7.3)
 # ============================================================
 param(
     [string]$GameDirG = "C:\steam\steamapps\common\Iron Nest Heavy Turret Simulator",
     [string]$GameDirD = "C:\steam\steamapps\common\Iron Nest Heavy Turret Simulator",
-    [string]$Version = "0.0.1-Alpha-3"
+    [string]$Version = "0.0.1-Alpha-4"
 )
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"   # Compress-Archive 处理大文件时进度条会崩，禁用

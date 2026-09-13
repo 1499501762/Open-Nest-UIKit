@@ -7,7 +7,7 @@
     <AssemblyName>OpenNestUIKit.Test.MelonMod</AssemblyName>
     <RootNamespace>OpenNestUIKit.Test</RootNamespace>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <Version>0.0.1-Alpha-3</Version>
+    <Version>0.0.1-Alpha-4</Version>
     <!-- OpenNestUIKit.Test —— 测试模组（MelonLoader 版）：与 BepInEx 版共用同一份源码，只换入口壳。 -->
     <DefineConstants>$(DefineConstants);MELONLOADER</DefineConstants>
     <GameDir Condition="'$(GameDir)'==''">C:\steam\steamapps\common\Iron Nest Heavy Turret Simulator</GameDir>

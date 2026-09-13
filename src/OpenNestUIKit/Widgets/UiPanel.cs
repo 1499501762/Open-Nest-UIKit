@@ -142,6 +142,20 @@ public sealed class UiSeparator : UiWidget
         var spriteRef = UiSurface.LineRef();
         if (!string.IsNullOrEmpty(label))
         {
+            // 工业风分组：左侧 **2px 琥珀竖条** + 分组名（字距拉开 1.5）—— 一眼能认出“这是一段的开始”
+            var barRt = NewRect("hbar", rt);
+            var barImg = barRt.gameObject.AddComponent<Image>();
+            barImg.color = Theme.UiTheme.Accent;
+            barImg.raycastTarget = false;
+            try
+            {
+                barRt.anchorMin = barRt.anchorMax = new Vector2(0f, 1f);
+                barRt.pivot = new Vector2(0f, 1f);
+                barRt.sizeDelta = new Vector2(2f, 12f);
+                barRt.anchoredPosition = new Vector2(0f, -2f);
+            }
+            catch { }
+
             // ⚠ 标题必须**铺满整块 + 单行**：早期写死 200 宽 → 长标题在 200px 里折行，
             //   而行高固定 22 → 第二行溢出/被裁（用户报“标题宽度没有沾满整个块，错误换行了”）。
             var txt = UiText.Create(rt, label, UiTextKind.Header, 0f, TextAlignmentOptions.Left);
@@ -150,16 +164,18 @@ public sealed class UiSeparator : UiWidget
                 txt.Rect.anchorMin = new Vector2(0f, 1f);
                 txt.Rect.anchorMax = new Vector2(1f, 1f);
                 txt.Rect.pivot = new Vector2(0f, 1f);
-                txt.Rect.offsetMin = new Vector2(0f, -18f);
+                txt.Rect.offsetMin = new Vector2(8f, -18f);
                 txt.Rect.offsetMax = new Vector2(0f, 0f);
                 txt.Rect.sizeDelta = new Vector2(0f, 18f);
                 txt.SetSingleLine(true);
+                txt.LetterSpacing = 1.5f;
             }
             catch { }
         }
 
         var line = NewRect("line", rt);
         var img = line.gameObject.AddComponent<Image>();
+        float lineH;
         if (!spriteRef.IsEmpty)
         {
             img.sprite = spriteRef.Sprite;
@@ -167,12 +183,14 @@ public sealed class UiSeparator : UiWidget
             try { img.fillCenter = spriteRef.FillCenter; } catch { }
             img.color = new Color(1f, 1f, 1f, 0.55f);
             try { img.pixelsPerUnitMultiplier = Theme.UiTheme.SpritePpuMul; } catch { }   // 照抄原生 2.5（见 UiTheme.SpritePpuMul）
-            Theme.UiTheme.SetRect(line, 0f, h - 6f, 100f, 6f);
+            lineH = 6f;
+            Theme.UiTheme.SetRect(line, 0f, h - 6f, 100f, lineH);
         }
         else
         {
-            img.color = Theme.UiTheme.Border;
-            Theme.UiTheme.SetRect(line, 0f, h - 1f, 100f, 1f);
+            img.color = Theme.UiTheme.Hairline;
+            lineH = 1f;
+            Theme.UiTheme.SetRect(line, 0f, h - 1f, 100f, lineH);
         }
         img.raycastTarget = false;
 
@@ -186,7 +204,12 @@ public sealed class UiSeparator : UiWidget
             line.pivot = new Vector2(0.5f, 1f);
             line.offsetMin = new Vector2(0f, 0f);
             line.offsetMax = new Vector2(0f, 0f);
-            var sd = line.sizeDelta; sd.x = 0f; line.sizeDelta = sd;
+            var sd = line.sizeDelta;
+            sd.x = 0f;
+            // ⚠ 高度必须写回：上面把 `offsetMin/offsetMax` 都置 0（而垂直方向是点锚），
+            //   会把 `sizeDelta.y` 归零 ⇒ **分隔线高度 0、根本看不见**（实测 `sep/line rect=440x0`）。
+            sd.y = lineH;
+            line.sizeDelta = sd;
             line.anchoredPosition = new Vector2(0f, -(h - 6f));
         }
         catch { }

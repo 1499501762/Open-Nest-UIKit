@@ -36,6 +36,179 @@
 >   ④ 新增测试命令 `escmode / clicknative / injectdiag / uninject / rects / chain / pageopen / pageback / pageclose`（见 `docs/UI_KIT_TEST.md`）。
 
 > **更新记录**：
+> - 2026-09-13（四十六）**中文输入：拼音尾巴 + 一次“切不了了”的回归（结论修正）**（用户：“中文输入会跟随拼音变成‘中文zhong'wen’这样” → 修完又报“中文输入切不了了”）：
+>   ① **通道模型（之前判反了，这里是实测修正）**：`GCS_RESULTSTR`（原生串）在某些输入法/Unity 组合下给的是
+>      **未转换的拼音**（`zhong'wen`），而 **转换后的汉字在“组合结束那一刻”的 `compositionString`** 里。
+>      ⇒ 单纯按“已收到原生提交就不再追加组合串”去挡，就会**把唯一能送汉字的通道关死**（中文完全进不来）。
+>   ② **最终判据（两条路统一，纯看内容不看来源）**：
+>      · `ShouldAppendNative(native)` —— 只收**含 CJK** 的（拼音串丢弃）；
+>      · `ShouldAppendComposition(cached, cur, lastNative)` —— 含 CJK + 与现有文本不重复（**不再有“是否已收到原生提交”这种前置条件**）。
+>   ③ 同帧双通道去重：`_nativeCjkFrame`（只有**真的追加了含 CJK 的原生串**才标记），同帧内 `OnTextInput` 不再追加。
+>   ④ **可离线回归**：新增 `UiTextRouter.ImeDecision(native, cached, cur, lastNative)`（纯函数）
+>      + 测试模组命令 `imedecide:<native>|<cached>|<cur>`（空格写 `_`）——不需真输入法就能锁住这套判据。
+>      实测 6 组：`native=zhong'wen` → skip（拼音不进框）；`native=中文` → append；
+>      `native=中文,cached=中文,cur=中文` → native append / cached skip（不重复）；两者皆拼音 → 都不追加。
+>   ⑤ IME 诊断（原生提交/拼音跳过/组合结束/OnTextInput CJK）由 `CoopLog.Debug` 升为 **Info**：
+>      以后再出这类问题，`uikit.log` 直接能看到是哪个通道在送什么串。
+>   ⑥ **第二轮（用户：“系统的输入法在打开输入框的时候切换不了中文输入模式，只能在英文输入模式”）**：
+>      这是**系统层**问题，不是提交逻辑 —— Unity 只在 `TMP_InputField` **真正拿到焦点**时才把
+>      `Input.imeCompositionMode` 置为 `On`；我们的窗口在自己的画布上、游戏 EventSystem 常常禁用 ⇒
+>      焦点不生效 ⇒ 组合模式停在 `Auto/Off` ⇒ OS 没有把 IME 上下文关联到窗口 ⇒ **输入法锁在英文/直接模式**。
+>      实测探针：`IME 上下文=未关联（系统输入法会被锁在英文模式）`。
+>      修法：聚焦时**显式**把组合模式置 `On`（`Input.imeCompositionMode` 在 IL2CPP interop 里没暴露 ⇒ 用**反射**，
+>      游戏里确实有该属性，见 `tools/dump_inputlegacy.txt`；失焦恢复原值）；仍在 `EventSystem.SetSelectedGameObject +
+>      ActivateInputField + Keyboard.SetIMEEnabled(true) + SetIMECursorPosition` 全套；
+>      再加**兜底**：聚焦后 0.4s 复查 `ImmGetContext(hwnd)`，仍为 0（=没关联）就 `ImmCreateContext + ImmAssociateContext`。
+>      实测日志：`IME 激活：组合模式=On（进入前=Auto）` → `IME 上下文已由引擎关联（正常）`
+>      → **`IME 原生提交 added='中文'`**（真汉字入库，用户实机同时间输入）。
+>      `widgetprobe` 已带上 `组合模式 / 进入前 / 锚点焦点 / EventSystem / hwnd / IME 上下文` 六项，看一眼就知道卡在哪层。
+>   ⑦ **第三轮（用户：“中文输入之后回车发送之后又唤起输入了、上一条输入的信息还在 / 清空再回车还是返回上条结果”）**：
+>      两个独立原因：
+>      · **旧文本回填**：失焦/提交时没清 `_compositionLast`（组合缓存）→ 下次聚焦时“组合结束”那条兜底
+>        把**上一次的文本**补进空框 → 框里又有字 → 回车就把同一条消息再发一次。
+>        修：`SetFocused(null)` 与 `Submit()` 都清掉 `_compositionLast / _lastNative / _pendingChar / _composing`。
+>      · **发送后又被弹开**：中文输入法里“回车确认候选词”会从**文本通道**发一个 `\r`，那一刻还在组合中（不走提交分支）
+>        ⇒ `ConsumedEnter=false` ⇒ 聊天层“回车唤入”把它当新回车又把输入框弹开。
+>        修：`UiChatOverlay.Tick` 的唤入条件加**提交冷却**（`Time - UiTextRouter.LastSubmitAt > 0.35s`，新增该时间戳）。
+>      另外：`UiChatOverlay.Focus()` 在**全新展开**（之前是收起态）时把输入框清空（`draft` 显式给了才保留）。
+>      实测（真 Enter 注入）：发送后 `上次发送='你好'｜输入框文本=''｜展开=False｜输入框聚焦=否`，900ms 后仍保持；
+>      `聊天关→聊天开` 后 `输入框文本=''`（无残留）。
+>   ⑧ **（用户：“聚焦修好了，但旧文本回填还是在”）真因已定位（关键：`GCS_RESULTSTR` 是“持值”而不是“事件”）**：
+>      `ImmGetCompositionStringW(GCS_RESULTSTR)` 会把**上一次提交的串一直返回**；而旧代码在**聚焦时**把去重键 `_lastNative` 清空
+>      ⇒ 重新聚焦第一帧就把它当“新提交”又追加进空框。
+>      修法：① **`_lastNative` 跨聚焦持久，永不清空**（同一条只追加一次）；
+>      ② 同一条串何时算真提交？—— 只有**在这之后又观察到过一次“组合结束”**（`_wasComposing` 下降沿 + `_imeCommitFresh`）
+>      才算（既能防回填，也不会把“同一个词连打两次”误判成重复）；
+>      ③ 原生结果串仍**无条件读**：实测日志里汉字全是 `IME 原生提交 added='…'` 进来的（连“组合结束”那条路都没走过）
+>      ⇒ 加“组合窗口/打字活动”之类的门会直接把他们的输入法堵死（不能加）。
+>      ④ 新增测试钩子 `UiTextRouter.FakeImeResult` + 命令 `imefake:<文本>`（冒充持值串），**把“不可自动化的输入法”变成可回滚的回归**：
+>      实测 `imefake:旧文本` → 首次聚焦追加一次 → 发送清空 → 重新聚焦后**仍为空**（旧版会回填）；`chatprobe` 连续两次采样都为空。
+>   ⑨ **（用户：“第一次出现的候选词会重复一遍，比如 '中文' 变 '中文中文'，第二次再打就不会”）**：
+>      一次提交可能被**两条通道**各送一次（原生结果串 / 组合结束 / 逐字 `OnTextInput`），两者可能隔几十帧；
+>      “第二次不会”正是因为那时 `_lastNative` 已等于该串。
+>      修法：**跨通道去重 = 框尾就是这段文本 + 距上次追加不过久 + 期间没有新的打字活动**（`RecentlyAppended`）：
+>      “期间有无新活动”是区分「同一次提交的第二个通道」与「用户新打了一个词」的**唯一可靠判据**。
+>      活动信号包含：物理键、逐字通道、锚点组合串 —— 以及 **原生 `GCS_COMPSTR`（`_composing`）**：
+>      本机输入法恰好只能从原生侧看到组合（§6 的教训），**不把 `_composing` 计入活动就会把新词误拦**
+>      （实测日志：`'中午呢'/'中文'/'英文'` 被当成重复跳过 → 已修）。
+>      回归：`imecomp:<文本>`（冒充一帧组合串）+ `imefake:<文本>`（冒充持值原生串）可以离线造出“两通道各送一次”：
+>      实测 `组合结束提交 '中文'` → 原生 `'中文'` 被跳（去重）→ `输入框文本='中文'`；再打一个词 → `'中文英文'`（**新词未被误拦**）。
+> - 2026-09-13（四十五）**观感第二轮（用户：“好看多了，还能更好看吗”+“右上角 Close 文本改成 ×”）**：
+>   ① **标题栏按钮两态**：栈底 = **图标「×」紧凑方形（28×0）**、有上级页 = 文字「&lt; 返回（84 宽）」；
+>      新增 `UiButton.SetSize(w,h)`（运行期改尺寸 + 重挑素材），三件事（宽度/文案/标题避让）统一在 `UiMenuWindow.RefreshHeaderButton()`。
+>      实测：`crop_close.png` —— 深底 + 1px 描边 + 白「×」（字体有该字形，不是 tofu）。
+>   ② **页签扁平化**：不再用暗金填充底（与下划线双重强调显得脏）→ 底色统一内容底，**选中 = 琥珀文字 + 2px 下划线**，
+>      并给整条页签栏加 1px 发丝线。
+>   ③ **分组标题**：左侧加 **2px 琥珀竖条** + 字距 1.5（工业风“机柜标签”感）；普通分隔线改用 `Hairline`。
+>   ④ **按钮统一 1px 描边**（主/危险用琥珀/红半透明，次按钮用冷灰）—— 否则纯色块看着没“壳”。
+>   ⑤ **标题栏左缘 3px 琥珀竖条** + 标题单行省略 + 字距 1.5。
+>   ⑥ **底栏文字单行省略**（`_crumb`/`_status`）：宿主给的摘要一长就折成三行、溢出底栏面板（用户截图实证）。
+>   ⑦ **页签热区加前缀**：`UiTabs.Create(..., zonePrefix)` → `tab:&lt;键&gt;:&lt;i&gt;`（一页里两条页签栏不再共用 `tab0..`，自动化/排查才不会命中错的那条）。
+> - 2026-09-13（四十四）**扁平化工业风落地 + 修“外面那个块被撑大/外层滚动条”**（用户：“扁平化工业风 / 左右两块外面那个块还是被撑大了，而且有滚动条”）：
+>   ① **修外层被撑大（真因 = 高度自引用）**：`UiList.ApplyLayout` 里 `SetRect(Content, …, ContentHeight)` 而
+>      `ContentHeight = Σ子项高`；两栏页里子项（`Grow(1)` 的列表）又依赖 `flow.known`（= 内容层高）
+>      ⇒ **自引用收敛到 0**：实测 `colL/mm.list/viewport rect=440x0`、`colR/mm.right/viewport=685x0`
+>      （内嵌列表视口 0 高、内容被 `RectMask2D` 整片裁光）。
+>      现约定：**宿主 flow 声明 `AutoHeight=false` ⇒ 内容层铺满视口**（`fillHost`），`ContentHeight = vh`
+>      ⇒ 外层滚动量恒为 0（外层滚动条消失），滚动交给内嵌列表。复测：`mm.list/viewport=440x461`、
+>      `mm.right/viewport=685x479`、`list/viewport/content=1137x594`。
+>   ② **调色板改扁平工业**：冷灰钢底（`WindowBg 0.078/0.086/0.098`）+ `Border 0.216/0.235/0.263`（1px 冷描边）
+>      + 新增 `Hairline`（1px 发丝线，alpha 0.5）；**行底与内容底同色**（不再靠明度阶梯分层）。
+>   ③ **程序化描边/发丝线**（`ModStyle.{Outline,TopRule,BottomRule,LeftRule}`，全是 1px 纯色块，不依赖任何游戏素材）：
+>      整窗一圈描边、标题栏下沿琥珀细规、底栏实底 + 顶部发丝线、列表行底发丝线 → **层级全靠线条，不靠阴影/渐变**。
+>   ④ **新增 `UiRowKind.Info = 17` + `UiPageDef.Info(label, value)`**（详情/诊断页属性表）：
+>      标签列固定宽 `UiTheme.KvLabelW = 76`、值列**左对齐**求两列对齐（不再是“状态：xxx”一行到底）。
+>      实测：`content/kv/text rect=76x36 pos=(0,0)`（标签）+ `rect=594x36 pos=(84,0)`（值）。
+>      ModMenu 详情/诊断页的 状态/文件/配置/版本/作者/依赖/不兼容/备注 已全部改用它。
+>   - 实测截图 `shots/flat2.png`（两栏视口修复后）、`shots/flat3.png`（扁平风 + 键值两列）、`shots/flat4.png`（Coop 回归，无异常）。
+>   - 上一轮列的“未做”里，**详情页键值两列已落地**；图标隐喻 / 圆角质感 / 全局密度重排仍待定（先看这版基调）。
+> - 2026-09-13（四十三）**观感精修（第一轮，工业拟真方向）**（用户：“整个 UI 风格重新设计一下，不好看”；当时不在线 ⇒ 按“与游戏一致”的方向自主推进）：
+>   ① **修 `UiSeparator` 高度归零**（实测 `sep/line rect=440x0`）：建线时把 `offsetMin/offsetMax` 都置 0（而垂直方向是点锚）
+>      ⇒ `sizeDelta.y` 被归零 ⇒ **分隔线根本看不见**（分组没有视觉分隔）。现把高度写回（贴图线 6px / 纯色线 1px）。
+>      ⚠ 这是“看着平”的一大来源。
+>   ② **配色层次拉开**：`ContentBg 0.071→0.055`、`RowBg 0.086→0.098`（行与底终于有明度差）、`Border 0.165→0.145`（分隔线不抢戏）。
+>   ③ **选中态改暗金**：`RowSelected = (0.196,0.161,0.082)`（与 `Accent` 金呼应）+ 新增 `RowSelectedText` 米金色；
+>      并在 `UiNavRow` 加 **3px 左侧强调条**（只选中时显示）—— 比“只换底色”更能一眼看出选中在哪行。
+>   ④ ModMenu 左栏副文本按状态**着色**（`ModMenuDisplay.MetaColor` 富文本：已加载绿 / 未加载灰 / 禁用橙 / 重复红）。
+>   - 实测截图 `shots/sty1.png`（ModMenu）与 `shots/sty2.png`（Coop，选中页签已呈金色）。
+>   - **未做（待定方向再动）**：详情页键值两列对齐、图标隐喻、圆角/描边质感、标题栏底栏重做、全局密度与字号重排
+>     —— 这些会同时影响所有页面（ModMenu/Coop/自带页），建议先定基调再动。
+> - 2026-09-13（四十二）**列表行：右对齐副文本 + 主文本截断（`SelectableList` 带 hints）**（用户：“左侧列表没有最大字符数量限制，版本号没有强制在列表右侧右对齐显示”）：
+>   ① 契约：`UiRow.ListHints` + 新的 `UiPageDef.SelectableList(key, height, items, hints, selected, onSelected)` 重载——
+>      信息型列表的标准排版（左主文本 + 右版本/状态**对齐成一列**）。
+>   ② `UiNavRow`：原来 `hint` 右对齐区写死 196 宽且**主文本不让位**（长名称会盖住它）⇒ 现按 `HintW` 让位 + 主/副文本都**单行省略**
+>      （`SetSingleLine`）；`HintW` 收窄到 **110**（模组列表左栏只 440，过宽会把名称都省略掉）。
+>   ③ 踩到并修正：`ModMenuDisplay.MetaText` 本身就已是“行右侧短状态（已加载给版本号，否则给状态词）” ⇒
+>      调用方**不要再拼 `e.Version`**（否则出现 `2.3.2 2.3.2`）。
+>   ④ ModMenu 侧：来源 pill 用 `PadRight` 补到固定宽 + **每一行都预留** `> ` 的两字符前缀（游戏字体是等宽 CourierPrime，
+>      空格能对齐）⇒ 所有行的名称起点对齐；名称硬截断 22 字符（ASCII 三点）与渲染层单行省略双保险。
+>   - 实测截图 `shots/mm7.png`：`[BepInEx] BepInEx.MelonLoad...  2.3.2` / `[dep] LiteNetLib  not loaded` 式排版，名称对齐、版本右对齐。
+> - 2026-09-13（四十一）**修 `Columns` 右栏宽度不撑满 + 新增底栏常驻信息 `UiKitHost.SetFooter`**（用户：“ModMenu 右侧块宽度没有撑满宽度，底下那个块又把块高度撑出去了，直接放底栏那个 Open Nest Mod Menu 右侧吧”）：
+>   ① **右栏宽度真因（三层）**：(a) 页面构建时**页面流宿主还是兜底宽 300**（`UiList.Create` 写的内容区初值），
+>      此时 `columns` 容器被排成 300 ⇒ `colR` 算出来只有 340（窗口 1180）；(b) 更致命的是 `lf/rf.Apply()` 会把
+>      `colL/colR` 的锚点**改成点锚**（`UiFlow.SetRect` 的语义）⇒ 宽度从此**钉死在构建时的值**，容器变宽也不再跟随；
+>      (c) 原实现里右栏宽度是 `anchor + sizeDelta` 手算的（`sizeDelta.x` 还写成 `+40`）。
+>      **修**：左右栏宽度全交给 `columns` 容器的**横向 flow**（`UiSize.Fixed(leftW)` + `UiSize.Grow(1)`），
+>      并把这个 flow **本身**挂进页面流（`UiFlow.IsFlow` ⇒ 上层流 `Apply()` 时会**递归 Apply** 它）
+>      ⇒ 容器尺寸后到 / 窗口变化时右栏自动跟上。实测：`colR` 宽度 **340 → 685**（= 1137−440−12，精确撑满）。
+>   ② **底栏常驻信息**：新增契约 `UiKitHost.SetFooter(text)`（宿主实现 `UiMenuWindow.SetFooter`）——
+>      与宿主自己的临时提示**共用底栏右侧位置**（提示优先，过期后回落）。ModMenu 把原来占页面高度的
+>      “宿主 / UIKit / 提供者统计”三行移到这里 ⇒ 页面高度不再被顶出窗口。
+>   ③ 实测：`rects` → `colR/mm.right/viewport rect=685x470`、`colL/mm.list/viewport rect=440x470`；
+>      底栏右侧显示 `宿主：… · UIKit：…｜提供者 …`；截图 `shots/mm5.png`。`PASS=5 FAIL=0`。
+>  ④ 排查手法（值得复用）：给 `UiFlow.Apply` / `UiList.ApplyLayout` 加一行 `[diag]` 日志打印**宿主名+实测宽**，
+>      一眼看出“页面流宿主宽 300（构建时兜底）→ 就绪后 1137”，而容器宽没跟上 —— 比单纯看 `rects` 快得多。
+> - 2026-09-13（四十）**菜单标题栏只留一个关闭按钮**（用户：“两个菜单右上角的 Close 和右上角的 X 只留一个就行了”）：
+>   以前标题栏右侧有**两个**：`UiWindow` 自带的 `X`（热区 `btn:close`，贴右 12px）+ `UiMenuWindow` 自己加的「返回/关闭」按钮
+>   （栈底时文案=关闭；原本左移到 -54 就是给那个 X 让位）。
+>   现在**只留后者**（它有返回语义，子页面必需）：`UiMenuWindow` 建窗口时传 `onClose = null` —— `UiWindow` 相应把标题框右边界
+>   从 `-56` 放宽到 `-Pad`（只有真建了关闭按钮才给按钮留位），并把「返回/关闭」按钮贴回右边距 12、
+>   标题右边界按按钮宽重新内缩（-106）避免压字。
+>   - 实测：`zones` 从 `btn:close | btn:< Back` 变为只剩 `btn:< Back`；截图 `shots/hdrcoop.png`（Coop 菜单）与 `shots/hdrmm.png`（ModMenu）
+>     标题栏均只剩一个按钮。`PASS=7 FAIL=0`。
+>   - `UiWindow.CloseButton` 不再被赋值（无消费者）⇒ 传 `onClose = null` 时它就是“无自带关闭按钮”的骨架（第三方仍可传回调保留 X）。
+> - 2026-09-13（三十九）**修“聚焦输入框再失焦 → 游戏 UI 全部点不动”**（用户：“Chat 聚焦在失去聚焦之后就会导致菜单组件都没法接受点击”）：
+>   真因是 `UiInputGuard` 的 **`_textRc`（聚焦期额外压住的射线器）只增不减、从未还原** ——
+>   `SetTextCapture(false)` 的还原分支只做了“模块重新停用 + EventSystem 还原”**漏了射线器**（§8.2 当时的描述是错的），
+>   `Restore()` 与 `EnsureReleasedWhenIdle()` 也都没管它 ⇒ 只要聚焦过一次输入框，游戏自己的射线器就**永久 `enabled=false`**。
+>   实测：聚焦瞬间压住 **60 个** `GraphicRaycaster`；失焦后修复前仍为 60（游戏 UI 彻底没点击），修复后回 **0**。
+>   修：新增 `RestoreTextRaycasters()`，在 `SetTextCapture(false)` 与 `Restore()` 里都调用，并把 `_textRc.Count` 纳入
+>   `EnsureReleasedWhenIdle()` 的“残留”判定（自愈）；探针（`widgetprobe` 的拦截层行）新增 `聚焦临时压住射线器=N 打字中=…`。
+>   ⚠ **复盘教训**：上一轮用“拦截层：游戏输入模块 启用/停用”就下了“无残留”的结论是**不够的**——
+>   那两项本来就正常，漏的恰恰是当时探针没覆盖的 `_textRc`。**探针没覆盖到的东西，等于没验证。**
+> - 2026-09-13（三十八）**修收起态提示行压住最后一条消息**（用户：“回车 打开聊天和最后一条消息重叠了”）：
+>   列表视口高以前写死 `PanelH - 30`（只扣了标题 24 + 间隙），**漏算了底部那行提示（24）** →
+>   列表底边 -184 落在提示行（顶边 -166）上，**重叠 18px**。现改为按分区显式计算并用常量统一三处：
+>   `ListH_Collapsed = PanelH - 标题24 - 提示行24 - 6×2 = 130`、`ListH_Expanded = PanelH - 74 = 116`（保持原值），
+>   三处 = `UiList.Create` 的初值 / `EnsureBuilt` 的 offsetMin·offsetMax·sizeDelta / `SetExpanded`。
+>   实测：收起态 `视口=324x130 可滚=579.4 偏移=579.4 可见行=6#25~#30`，截图 `shots\chat hint.png` 提示行与消息已分开。
+> - 2026-09-13（三十七）**悬浮聊天层交互修复：菜单关着时点不动/滚不动、不在最底、抢菜单点击**（用户：“左侧 Chat 失去焦点之后无法与菜单交互，层级问题或者穿透拦截没有正常取消 / Chat 滚动应该默认在最底，滚轮不生效，无法点击”）：
+>   ① **真因（滚轮不生效 + 无法点击）= 指针路由根本没开**：`UiPointerRouter.Tick` 第一行是 `if (!Active) return;`，
+>      而 `Activate()` **只在菜单窗口/原生页打开时**被调 —— 菜单关着时浮窗的热区全是死的。
+>      修：`UiChatOverlay.Tick` 每帧兵底 `if (!Active) Activate();`（浮窗在 → 路由就得活），`Clear()` 里若菜单没开则 `Deactivate()`。
+>      ⚠ 附带发现：`Clear()` 原先只 Destroy 画布、**从不清热区** → 反复进出会话就不断累积死热区（Rect 已销毁，靠 try/catch 跳过）。已改为先 `Remove` 再 Destroy。
+>   ② **抢菜单点击**：“点浮窗展开”热区覆盖整个浮窗且**后登记=优先** —— 若浮窗在菜单**之后**注册（先开菜单、再进会话），
+>      与菜单重叠的那块就点不动了。修：**菜单打开时直接禁用它**（`Tick` 每帧同步 `Enabled = !展开 && !菜单开`；
+>      展开时也禁用 —— 那正是“点列表没反应”的原因：收起态它在列表之后注册、展开态又把列表的点击全吃掉）。
+>   ③ **不在最底**：展开把视口从 160 压到 116，可滚量 549.4→593.4，而 `_scroll` 停在 549.4。修：`SetExpanded` 改完高度后 `ScrollBy(float.MaxValue)`。
+>   ④ **实机取证（`chatdemo` + G 端）**：收起态滚轮 `发给 'chat-list-viewport'` 偏移 549.4→423.4；
+>      `tap:chat-open` → `展开=True`；展开态 `可滚=593.4 偏移=593.4`（在底）→ 滚轮后 467.4；菜单打开时 `展开热区=禁用`。`PASS=5 FAIL=0`。
+>   ⑤ **“穿透拦截没正常取消”排除**：`chatopen`（展开/打字）与 `chatclose`（收起）两态的 `widgetprobe` 都是
+>      `输入管线：聚焦=-/''` + `拦截层：模块 启用=0 停用=0 世界点击前缀=未装 交互锁=False` → 拦截层无残留，不复现该猜测。
+> - 2026-09-13（三十六）**悬浮聊天层两处渲染修复**（用户：“Chat 左侧框还是没有聊天记录，失去聚焦模式背景没有足够透明”）：
+>   ① **`UiList` 重排不收敛 → 内容被整片裁掉（真因）**：`ApplyLayout` 里 `SetRect(Content, …, ContentHeight)` 用的是**上一轮**的
+>      `ContentHeight`，而 `ClearRows()` 会把它归零 ⇒ 重建后写下去的是 **0 高内容区**，`RectMask2D` 把行全部裁掉
+>      （`Count/rows` 都 >0，但一条也看不见）。常规页面靠“父尺寸后到”会再排一次盖过去；**固定尺寸宿主**
+>      （悬浮聊天层宽度从头到尾不变）下 `MaybeRelayout` 因宽度相等直接 return ⇒ 永不收敛。修：`ContentHeight` 算出后**再落定一次**。
+>   ② **面板宽度写成了绝对宽**：`UiChatOverlay.SetExpanded` 里 `_list.Rect.sizeDelta = (PanelW - 16, …)`，
+>      但列表水平 anchor 是 (0,1)-(1,1) **拉伸态** ⇒ 实际宽 = 父宽 + 324，配合居中 pivot 把整块内容推到面板**左边框之外**
+>      （短消息一条都看不见）。修：写相对增减 `-16`；并在改高度后立刻 `ApplyLayout()`（否则滚动上限按旧视口高算）。
+>   ③ **输入框背景与面板背景是同一个 Image**：`_inputBg = _panelBg` 使 `SetExpanded` 末尾那次“输入框色”赋值
+>      把面板 alpha 覆盖成**不透明**（收起态本该 0.34）⇒ 即用户看到的“失去聚焦模式背景没有足够透明”。修：删掉共享。
+>   ④ **实机验证（注入式，不依赖联机会话）**：新增测试命令 `chatdemo:<条数>` ⇒ `listprobe` 输出
+>      `chat-list rows=6 内容高=143.5 视口=324x160 可见行=6#1~#6`；`chatprobe` 输出收起态 `alpha=0.34 列表高=160`、
+>      展开态 `alpha=0.94 列表高=116`；截图 `shots\chat collapsed.png` / `chat expanded.png` 都是“框里有 6 条 + 半透明”。`PASS=4 FAIL=0`。
+>   ⑤ 诊断增强：`UiChatOverlay.Probe()`（即 `chatprobe`）增打 **面板背景 alpha** 与 **列表高** —— 透明度/几何一眼可验。
 > - 2026-09-13（三十五）**契约扩容（第一/二档 + 命名统一）+ 发 `0.0.1-Alpha-3`**（用户：“第一档先做掉，第二档你提的几个都做掉，第三档改名统一先做”）：
 >   ① **新行动词**：`Stepper`（原生 `− 值 +`，宿主已有 `UiStepper` 终于暴露）、`Foldout`（折叠分组，
 >      **只在展开时调用 body**，收/展后宿主自己重建页面，第三方只需存状态）、`SelectableList`（单行选中高亮，
@@ -1102,7 +1275,17 @@ NativeMenuBridge.Add(new NativeMenuEntry {
 **聚焦时唯一要做的“环境准备”**：临时放行拦截层（`UiInputGuard.SetTextCapture(true)`）——
 激活游戏 `EventSystem`（主菜单实测 `EventSystem.current == null`）+ 启用那 1~2 个原本 enabled 的输入模块 +
 压住外部 `GraphicRaycaster`。原因：**输入法组合只送到已聚焦的输入框**，而 `isFocused` 需要 `EventSystem` 与输入模块。
-失焦立即原样还原（模块重新停用、EventSystem 还原、射线器还原）。
+失焦立即原样还原（模块重新停用、EventSystem 还原、**聚焦期临时压住的射线器 `_textRc` 也要放回去**）。
+
+> ⚠️ **2026-09-13 真坑（用户：“Chat 聚焦在失去聚焦之后就会导致菜单组件都没法接受点击”）**：
+>   以前 `SetTextCapture(false)` 的还原分支**只做了前两项，漏了 `_textRc`**，而 `_textRc` 只增不减，
+>   `Restore()` 与 `EnsureReleasedWhenIdle()` 也都没管它 ⇒ **只要聚焦过一次输入框，游戏自己的射线器就永久 `enabled=false`**。
+>   实测：聚焦瞬间压住 **60 个** `GraphicRaycaster`；失焦后修复前仍是 60、修复后回 **0**——
+>   游戏 UI（含 ESC 菜单里的按钮 / 原生菜单）因此完全接不到点击。
+>   现修：新增 `RestoreTextRaycasters()`，在 `SetTextCapture(false)` 与 `Restore()` 里都调用，
+>   并把 `_textRc.Count` 纳入 `EnsureReleasedWhenIdle()` 的残留判定（自愈）。
+>   ⚠️ 诊断教训：只看“游戏输入模块 启用/停用”就判定“无残留”是**不够的**（那两项本来就正常）——
+>   探针新增 `聚焦临时压住射线器=N 打字中=…`，以后这条链路一目了然。
 
 > 历史（十一）走过的弯路：用真实 `TMP_InputField` 收键 → ① `UiTextInput.TickAll` 从未被调用（托管轮询是死的）；
 > ② 我们为防穿透停用了游戏输入模块 → TMP 收不到键盘；③ TMP 文本从不回写 `OnChanged`。
@@ -1268,4 +1451,22 @@ dotnet build src\OpenNestUIKit.MelonMod\OpenNestUIKit.MelonMod.csproj -c Release
   层级比菜单低一档（菜单 32766），所以菜单打开时不会被浮窗挡住。
 - 历史每 0.4s 拉一次（`lines()` 返回最近 N 条），**内容 signature 变了才重建**（不闪、不丢滚动位置）；
 - 行数不确定 → 历史区就是一个 `UiList`（自带滚动条，见 §8.3）；
-- 诊断：测试模组 `chatprobe` / `widgetprobe` → `悬浮聊天层：注册=… 展开=… 行数=…｜输入框聚焦=…`。
+- 诊断：测试模组 `chatprobe` / `widgetprobe` → `悬浮聊天层：注册=… 展开=… 行数=… 面板背景alpha=… 列表高=…｜输入框聚焦=…`。
+
+### 已知坑（2026-09-13，三个都已修，前两个在 `UiList` 通用层）
+
+1. **`UiList` 一次重排不收敛**：`ApplyLayout` 里 `SetRect(Content, …, ContentHeight)` 用的是上一轮的 `ContentHeight`，
+   `ClearRows()` 归零后写下去的是 **0 高** ⇒ `RectMask2D` 把行全裁掉（`Count>0` 却一条不可见）。
+   **固定尺寸宿主不会再有第二次重排** ⇒ 必须在 `ContentHeight` 算完之后再落定一次。
+2. **水平拉伸 anchor 下 `sizeDelta.x` 必须是“相对父宽的增减”**（`-16`）：写绝对宽会把内容推出宿主左/右边界。
+   与之配套：改了视口高度要**立刻 `ApplyLayout()`**，否则滚动上限按旧视口高算。
+3. **不要拿 `_panelBg` 兼作输入框背景**：`SetExpanded` 末尾会把它覆盖成不透明，收起态就不透了（输入框背景由 `UiTextInput` 自管）。
+4. **浮窗类常驻 UI 必须自己保证 `UiPointerRouter.Active`**：它默认只在菜单/原生页打开时激活，菜单关着时浮窗热区全死（“滚轮/点击没反应”）。
+5. **新建的常驻热区要“看场合让位”**：覆盖整块的通用热区（如 `chat-open`）后登记=优先，会吃掉内部控件的点击；
+   菜单/展开态都应禁用，且注销时必须 `UiPointerRouter.Remove(zone)`（否则死热区累积）。
+6. **分区高度要一起扣**：收起态的列表高必须把**底部那行提示**也扣掉（`PanelH - 标题24 - 提示行24 - 2×6 = 130`），
+   以前写死 `PanelH - 30` → 提示行压在最后一条消息上（用户 2026-09-13）。面板内分区现在都是常量（`HeaderH`/`HintH`/`InputH`/`Gap`）。
+
+验证方式：`chatdemo:<条数>`（灌假消息，不需要联机会话）+ `chatopen`/`chatclose` + `listprobe`（行数/内容高/视口/**可滚量/当前偏移**/可见行）
++ `chatprobe`（展开/面板 alpha/列表高/**展开热区启用状态**）+ `scroll:chat-list-viewport:±N`（⇐ 必须用**内部**热区名；
+  `scroll:chat-list` 会先匹配到后登记的 `chat-list-scrollbar` 而报“该热区不支持滚轮”），见 `docs/UI_KIT_TEST.md`。

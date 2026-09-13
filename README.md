@@ -13,7 +13,7 @@ A standalone library that gives other mods two things the game does not expose:
 Works with **BepInEx 6 (IL2CPP)** and **MelonLoader 0.7.3**, including when MelonLoader
 mods run inside a BepInEx process through the `BepInEx.MelonLoader.Loader` bridge.
 
-> **Status: `0.0.1-Alpha-3` — public alpha (pre-release).**
+> **Status: `0.0.1-Alpha-4` — public alpha (pre-release).**
 > The native page, the widget set, the third-party contract, input isolation and the
 > dual-loader packaging are implemented and verified in-game on both loaders. The public
 > contract may still change between alpha builds.

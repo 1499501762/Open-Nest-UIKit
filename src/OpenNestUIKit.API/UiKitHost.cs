@@ -269,6 +269,21 @@ public static class UiKitHost
     }
 
     /// <summary>宿主专用：挂上悬浮层实现（重入安全；宿主关闭时传 null 即解钩）。</summary>
+    private static Action<string> _setFooter;
+
+    /// <summary>
+    /// 底栏右侧的**常驻**信息（宿主保持到下次设置；与宿主自己的状态提示共用同一位置，提示优先）。
+    ///
+    /// 典型用途：把“运行环境摘要 / 版本 / 统计”摆到底栏，而不是作为页面行占高度——
+    /// 后者会把页面（乃至窗口）高度顶出去。传空串 = 清除；宿主未实现时静默忽略。
+    /// </summary>
+    public static void SetFooter(string text)
+    {
+        try { _setFooter?.Invoke(text ?? ""); } catch { }
+    }
+
+    internal static void SetFooterControl(Action<string> set) { _setFooter = set; }
+
     internal static void SetChatControls(Action<string, Func<IReadOnlyList<string>>, Action<string>, Func<string>> set,
                                          Action clear, Action<string> focus, Action close)
     {

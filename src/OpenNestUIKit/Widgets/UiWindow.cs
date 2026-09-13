@@ -60,6 +60,10 @@ public sealed class UiWindow : UiWidget
 
         var fill = UiSurface.Build(rt, Theme.UiTheme.WindowBg, UiSurface.PanelSprite);
 
+        // 扁平工业风：整窗一圈 **1px 冷色描边**（程序化四边，不依赖任何九宫格素材）。
+        // 窗口与背景的分界就靠这一圈线（不用阴影/外发光，那些在游戏画面上会糊成灰边）。
+        Theme.ModStyle.Outline(rt, Theme.UiTheme.Border, Theme.UiTheme.OutlineW);
+
         var group = rt.gameObject.AddComponent<CanvasGroup>();
         try
         {
@@ -85,6 +89,8 @@ public sealed class UiWindow : UiWidget
         var headerBg = header.gameObject.AddComponent<Image>();
         headerBg.color = Theme.UiTheme.HeaderBg;
         headerBg.raycastTarget = false;
+        // 标题栏下沿的**琥珀细规**：扁平风里“标题栏”这层结构全靠这根线（不用渐变/阴影）。
+        Theme.ModStyle.BottomRule(header, Theme.UiTheme.AccentDim, Theme.UiTheme.OutlineW);
 
         var titleTxt = UiText.Create(header, title, UiTextKind.Title, 0f, TextAlignmentOptions.Left);
         try
@@ -93,7 +99,25 @@ public sealed class UiWindow : UiWidget
             titleTxt.Rect.anchorMax = new Vector2(1f, 1f);
             titleTxt.Rect.pivot = new Vector2(0f, 0.5f);
             titleTxt.Rect.offsetMin = new Vector2(Theme.UiTheme.Pad, 0f);
-            titleTxt.Rect.offsetMax = new Vector2(-56f, 0f);
+            // 右侧给「关闭按钮」留位；**没有关闭按钮时就不留**（否则标题无谓地短一截）
+            titleTxt.Rect.offsetMax = new Vector2(onClose != null ? -56f : -Theme.UiTheme.Pad, 0f);
+        }
+        catch { }
+        // 标题：单行省略（长标题不折行）+ 字距拉开一点（工业风标题看着更“制式”）
+        try { titleTxt.SetSingleLine(true); titleTxt.LetterSpacing = 1.5f; } catch { }
+
+        // 扁平工业风：标题左缘一根 **3px 琥珀竖条**（机柜铭牌那种标记；上下各留 12 让开描边）
+        try
+        {
+            var tag = NewRect("tagline", header);
+            var tagImg = tag.gameObject.AddComponent<Image>();
+            tagImg.color = Theme.UiTheme.Accent;
+            tagImg.raycastTarget = false;
+            tag.anchorMin = new Vector2(0f, 0f);
+            tag.anchorMax = new Vector2(0f, 1f);
+            tag.pivot = new Vector2(0f, 0.5f);
+            tag.offsetMin = new Vector2(0f, 12f);
+            tag.offsetMax = new Vector2(3f, -12f);
         }
         catch { }
 
