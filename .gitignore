@@ -1,0 +1,43 @@
+# ---- .NET build output ----
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# ---- Release packages (built locally, uploaded to GitHub Releases) ----
+release/*.zip
+release/*/
+
+# ---- Local / machine-specific ----
+*.local.ps1
+scripts/env.ps1
+.env
+
+# ---- Logs & captures ----
+*.log
+runlog/
+shots/
+
+# ---- Game files, interop assemblies and extracted game assets ----
+# Never commit anything that ships with the game.
+BepInEx/
+interop/
+Il2CppAssemblies/
+UserLibs/
+Mods/
+ref/
+model/
+*.bundle
+Assembly-CSharp*.dll
+Il2Cpp*.dll
+UnityEngine*.dll
+Unity.TextMeshPro.dll
+MelonLoader*.dll
+0Harmony.dll
+BepInEx*.dll
+
+# ---- OS noise ----
+Thumbs.db
+desktop.ini
+.DS_Store
