@@ -12,9 +12,10 @@
 
 ---
 
-## 一、首次发布：创建空仓库并推送
+## 一、首次发布：创建空仓库并推送（已执行，本节留作复现）
 
-本地仓库已经初始化并完成首个提交与 tag `v0.0.1-Alpha-1`，只差远端。
+✅ **2026-09-13 已完成发布**，事实与命令见文末「发布记录」。首次发布时本地仓库已初始化并完成首个提交与 tag
+`v0.0.1-Alpha-1`，远端由以下任一路径创建：
 
 ### 路径 A：先在网页创建空仓库（无需安装工具）
 
@@ -117,3 +118,40 @@ git grep -n -I -E 'Synchrony|IronNestFCS|decompiled|IronNestCoop' -- .
 
 命中就改写成通用描述（`<游戏目录>` / `<本仓库目录>` / “官方联机 UI”），例如源码注释里
 “抄 `Synchrony.MultiplayerMenu` 的做法” → “官方联机 UI 用的也是这一档”。
+
+---
+
+## 六、发布记录
+
+### `0.0.1-Alpha-1`（首个公开版本，2026-09-13）
+
+| 项 | 值 |
+|---|---|
+| 仓库 | <https://github.com/1499501762/Open-Nest-UIKit>（Public，AGPL-3.0，默认分支 `main`） |
+| commit | `1abcd5a`（首个提交，94 个文件，仅此一次提交，无历史泄露面） |
+| tag | `v0.0.1-Alpha-1` |
+| Release | id `387838334`，**Pre-release ✅**，正文 = `docs/RELEASE_NOTES.md`（5 188 字符） |
+| 资产 | `OpenNestUIKit-0.0.1-Alpha-1-BepInEx.zip`（168.8 KB）、`OpenNestUIKit-0.0.1-Alpha-1-MelonLoader.zip`（168.6 KB） |
+| topics | `bepinex, bepinex-plugin, il2cpp, iron-nest, melonloader, ui, ui-library, unity-mod` |
+| 发布前脱敏 | 全库扫描本机路径/用户名 = 0；闭源模组名 = 0 |
+| 克隆校验 | `git clone --branch v0.0.1-Alpha-1` → 94 文件 → 双端 `dotnet build` **0 错 0 警 / 0 错 1 警** ✅ |
+
+**本机发布手法**（本机无 `gh` CLI，走 REST API）：
+
+1. token 从凭据存储取，不落盘不回显：`"protocol=https`nhost=github.com`n`n" | git credential fill`
+   → 取其中 `password=` 行作 `Authorization: Bearer <token>`。
+2. 建仓：`POST https://api.github.com/user/repos`（body 只有 ASCII 字段）。
+3. 推代码/标签：`git push -u origin main` + `git push origin v0.0.1-Alpha-1`（凭据由 credential store 提供）。
+4. 建 Pre-release：`POST /repos/<owner>/<repo>/releases`（先只传 `tag_name/name/draft/prerelease`）。
+5. 正文：`PATCH /repos/<owner>/<repo>/releases/<id>`，body 用 `System.Web.Script.Serialization.JavaScriptSerializer` 序列化后
+   **写入 UTF-8 文件**再 `-InFile` 上传。
+6. 资产：`POST https://uploads.github.com/repos/<owner>/<repo>/releases/<id>/assets?name=<文件名>`，`-InFile <zip>`，`Content-Type: application/zip`。
+7. 校验：`GET /releases/tags/<tag>` 回读 `prerelease/draft/assets`，并 `git ls-remote` 对 commit。
+
+⚠️ **三条坑（都踩过）**：
+
+- PowerShell 脚本文件**必须是纯 ASCII**（本机 PS 5.1 按 ANSI 读无 BOM 文件，中文注释里的字节能拼出引号 → 解析报错）。
+- `$ErrorActionPreference='Stop'` + `git push ... 2>&1` 会把 git 的 **stderr 进度输出**当成致命错误直接中断脚本；
+  git 调用处改成 `Continue` 并检查 `$LASTEXITCODE`。
+- `ConvertTo-Json` 序列化从文件读来的长字符串会膨胀（实测 5 KB → 454 KB，被 GitHub 以
+  “body is too long (maximum is 125000 characters)” 拒绝）；用 `JavaScriptSerializer` 或手写转义。
